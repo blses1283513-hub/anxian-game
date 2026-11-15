@@ -1,0 +1,9 @@
+{
+  "name": "anxian-game-room",
+  "version": "1.0.0",
+  "private": true,
+  "description": "暗線遊戲室：感染戰與地鐵追捕的多人連線遊戲伺服器",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}

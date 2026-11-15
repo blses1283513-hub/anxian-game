@@ -1,0 +1,275 @@
+/* 暗線遊戲室 — rules engine. Shared by the browser (single-device mode) and the server (referee). */
+(function(){
+"use strict";
+const clone=o=>JSON.parse(JSON.stringify(o));
+const rnd=n=>Math.floor(Math.random()*n);
+const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=rnd(i+1);[a[i],a[j]]=[a[j],a[i]]}return a};
+/* ============ shared engine ============ */
+const GAMES={
+  virus:{name:'感染戰',min:6,max:16,ds:'隱藏身分。沒有投票，只靠技能、子彈和依號碼擴散的病毒分勝負。'},
+  chase:{name:'地鐵追捕',min:5,max:14,ds:'小偷在路線圖上隱藏移動收集贓物，三隊警察調查與逮捕，隊裡藏著內鬼。'}
+};
+function newState(game,hostId,code){return{v:1,code,game,hostId,phase:'lobby',players:[],kicked:{},
+  opts:{deathDelay:2,rounds:5,roundMin:30,lootGoal:6,maxRounds:15,verify:'3d',knowMates:0},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
+const nm=(S,id)=>{const p=S.players.find(p=>p.id===id);return p?p.name:'？'};
+function pub(S,t){S.pub.push({r:S.g?S.g.round:0,t});if(S.pub.length>150)S.pub.shift()}
+function note(S,id,t){(S.priv[id]=S.priv[id]||[]).push({r:S.g.round,t})}
+
+function act(S,pid,a,isHost){
+  if(a.k==='say'){
+    const t=String(a.text||'').trim().slice(0,200),v=S.phase==='play'&&S.game==='virus';
+    if(!t)return'沒有內容';if(!S.players.some(p=>p.id===pid))return'你不在名單內';
+    if(v&&!S.g.alive[pid])return'死者不能發言';
+    let to=a.to||'';
+    if(to==='#team'){if(!(S.phase!=='lobby'&&S.game==='chase'&&S.g&&S.g.roles[pid]))return'對象無效';to=S.g.roles[pid]==='thief'?'#th':'#t'+S.g.team[pid]}
+    else if(to.startsWith('#g')){const G=(S.groups||[]).find(x=>x.id===to);if(!G||!G.m.includes(pid))return'你不在這個群組'}
+    else if(to&&(to===pid||!S.players.some(p=>p.id===to)||(v&&!S.g.alive[to])))return'對象無效';
+    S.chatN=(S.chatN||0)+1;(S.chat=S.chat||[]).push({i:S.chatN,f:pid,to,t,r:S.g?S.g.round:0});if(S.chat.length>150)S.chat.shift();return}
+  if(a.k==='grp'||a.k==='grpinv'||a.k==='grpleave'){
+    const valid=id=>S.players.some(p=>p.id===id);
+    if(!valid(pid))return'你不在名單內';
+    if(S.phase==='play'&&S.game==='virus'&&!S.g.alive[pid])return'死者不能使用群組';
+    S.groups=S.groups||[];
+    if(a.k==='grp'){const m=[...new Set([pid,...(a.m||[]).filter(valid)])];
+      if(m.length<3)return'群組至少要 3 個人，兩個人請直接密談';if(S.groups.length>=30)return'群組數量已達上限';
+      S.grpN=(S.grpN||0)+1;S.groups.push({id:'#g'+S.grpN,n:String(a.name||'').trim().slice(0,10)||'群組'+S.grpN,m});return}
+    const G=S.groups.find(x=>x.id===a.g);if(!G||!G.m.includes(pid))return'你不在這個群組';
+    if(a.k==='grpinv'){(a.m||[]).filter(valid).forEach(id=>{if(!G.m.includes(id))G.m.push(id)});return}
+    G.m=G.m.filter(id=>id!==pid);if(G.m.length<2)S.groups=S.groups.filter(x=>x!==G);return}
+  if(['opt','game','start','next','again','kick','add'].includes(a.k)){
+    if(!isHost)return'只有房主可以操作';
+    if(a.k==='next'){if(S.phase!=='play')return'遊戲未在進行';return S.game==='virus'?vNext(S):cAdvance(S,true)}
+    if(a.k==='again'){S.phase='lobby';S.g=null;S.result=null;S.pub=[];S.priv={};S.chat=[];S.groups=[];return}
+    if(S.phase!=='lobby')return'遊戲已開始';
+    if(a.k==='opt'){const ok={deathDelay:[1,2],roundMin:[5,10,15,30],lootGoal:[5,6,7],verify:['3d','none'],knowMates:[0,1]}[a.o];if(!ok||!ok.includes(a.v))return'不支援的設定';S.opts[a.o]=a.v;return}
+    if(a.k==='game'){if(!GAMES[a.v])return'沒有這款遊戲';S.game=a.v;return}
+    if(a.k==='kick'){S.players=S.players.filter(p=>p.id!==a.t);S.kicked[a.t]=1;return}
+    if(a.k==='add'){if(S.players.length>=16)return'人數已滿';S.players.push({id:a.id,name:a.name});return}
+    if(a.k==='start'){const G=GAMES[S.game],n=S.players.length;
+      if(n<G.min||n>G.max)return`${G.name}需要 ${G.min}–${G.max} 人`;
+      S.pub=[];S.priv={};S.chat=[];S.groups=[];S.result=null;S.phase='play';S.gid=Math.random().toString(36).slice(2,8);
+      if(S.game==='virus')vDeal(S);else cDeal(S);return}
+  }
+  if(S.phase!=='play')return'遊戲未在進行';
+  return S.game==='virus'?vAct(S,pid,a):cAct(S,pid,a);
+}
+
+/* ============ 感染戰 ============ */
+const VR={
+  T:{n:'恐怖分子',f:'恐怖分子陣營',c:'threat',d:['病毒：全隊只有一次，指定 1 人感染','子彈：你個人一次，立刻擊殺 1 人','解毒劑：你個人一次，治好 1 名感染者（可用在自己）','勝利：至少一名恐怖分子存活，其餘玩家除抗體保有者外全部死亡']},
+  C:{n:'一般市民',f:'市民陣營',c:'safe',d:['沒有主動技能','勝利：恐怖分子全滅，或解毒劑製成']},
+  R:{n:'研究員',f:'市民陣營',c:'safe',d:['製藥：每回合指定 1 名受試者；對方是抗體保有者才成功','全隊每回合最多成功 1 次，累計 2 次解毒劑完成，市民立刻獲勝','第 1 次成功後，下一回合會全場公告「製造準備中」']},
+  J:{n:'記者',f:'市民陣營',c:'safe',d:['查驗：每回合確認 1 名玩家的角色','看不出對方有沒有抗體']},
+  I:{n:'搜查官',f:'中立',c:'neutral',d:['子彈：每回合可擊殺 1 人','勝利：恐怖分子全部死亡；越早達成獎勵越高']},
+  F:{n:'狂熱分子',f:'中立',c:'neutral',d:['沒有主動技能','勝利：自己死亡；越早死獎勵越高']}
+};
+const GN=['挽手臂','握手','擊掌','碰拳','搭肩','比槍','遞東西','碰杯','鞠躬','猜拳','拍背','勾小指'];
+const TASKS=[['挽住對方的手臂',0],['和對方握手',1],['和對方擊掌',2],['和對方碰拳',3],['把手搭在對方肩上',4],['用手指比槍對準對方',5],
+  ['遞一樣東西給對方',6],['和對方碰杯',7],['向對方鞠躬',8],['和對方猜拳',9],['拍對方的背',10],['和對方勾小指',11]];
+const VSK={T:['infect','shoot','antidote'],I:['shoot'],J:['check'],R:['research']};
+const SKN={infect:'投放病毒',shoot:'開槍',antidote:'解毒劑',check:'查驗身分',research:'製藥'};
+const vTask=(S,pid,k)=>{const t=S.g.task&&S.g.task[pid];return t&&t[k]!=null?TASKS[t[k]]:null};
+function vComp(n){const T=n>=8?2:1,R=2,J=1,I=n>=7?1:0,F=n>=10?1:0;return{T,R,J,I,F,C:n-T-R-J-I-F}}
+function vDeal(S){
+  const ids=S.players.map(p=>p.id),c=vComp(ids.length),roles=[];
+  for(const k of 'TRJIFC')for(let i=0;i<c[k];i++)roles.push(k);
+  shuffle(roles);const nums=shuffle(ids.map((_,i)=>i+1));
+  const g=S.g={round:0,roundStart:0,roles:{},num:{},alive:{},inf:{},used:{},ru:{},virusUsed:false,cure:0,cureRound:false,announced:false,deathRound:{},stats:{inf:0,dead:0,cure:0}};
+  ids.forEach((id,i)=>{g.roles[id]=roles[i];g.num[id]=nums[i];g.alive[id]=true;g.used[id]={x:0};g.ru[id]={x:0}});
+  const cs=ids.filter(id=>g.roles[id]==='C');g.antibody=cs[rnd(cs.length)];
+  g.task={};
+  ids.forEach(id=>{const pool=shuffle(TASKS.map((_,i)=>i));g.task[id]={x:0};(VSK[g.roles[id]]||[]).forEach((k,i)=>g.task[id][k]=pool[i])});
+  pub(S,'身分已發下。自由交談時間，房主開始第 1 回合後技能才能使用。');
+}
+function vTeam(S,r){return S.players.map(p=>p.id).filter(id=>S.g.roles[id]===r)}
+function vKill(S,t,cause){const g=S.g;g.alive[t]=false;g.deathRound[t]=g.round;delete g.inf[t];
+  pub(S,`${nm(S,t)} 死亡（${cause}），身分是「${VR[g.roles[t]].n}」`)}
+function vCan(S,pid,k,t){
+  const g=S.g,role=g.roles[pid],used=g.used[pid]||{},ru=g.ru[pid]||{};
+  if(!role||!g.alive[pid])return'你已出局';
+  if(g.round<1)return'第 1 回合尚未開始';
+  if(!g.alive[t])return'目標已經死亡';
+  if(k!=='antidote'&&t===pid)return'不能選自己';
+  if(k==='infect')return role!=='T'?'你沒有這個技能':g.virusUsed?'病毒已經被用掉了':null;
+  if(k==='shoot')return role==='T'?(used.bullet?'子彈已用完':null):role==='I'?(ru.bullet?'本回合已開過槍':null):'你沒有子彈';
+  if(k==='antidote')return role!=='T'?'你沒有這個技能':used.antidote?'解毒劑已用完':null;
+  if(k==='check')return role!=='J'?'你沒有這個技能':ru.check?'本回合已查驗過':null;
+  if(k==='research')return role!=='R'?'你沒有這個技能':ru.research?'本回合已試過':null;
+  return'未知的操作';
+}
+function vApply(S,pid,k,t){
+  const g=S.g,role=g.roles[pid],used=g.used[pid]||(g.used[pid]={}),ru=g.ru[pid]||(g.ru[pid]={}),know=!!S.opts.knowMates;
+  if(k==='infect'){
+    g.virusUsed=true;if(g.inf[t]==null)g.inf[t]=g.round;
+    vTeam(S,'T').forEach(id=>note(S,id,id===pid?`你把病毒投放給 ${nm(S,t)}`:know?`病毒已投放給 ${nm(S,t)}（${nm(S,pid)} 操作）`:'病毒已經被另一名恐怖分子用掉了'));
+  }else if(k==='shoot'){
+    if(role==='T')used.bullet=1;else ru.bullet=1;
+    note(S,pid,`你對 ${nm(S,t)} 開槍`);vKill(S,t,'槍擊');vCheck(S);
+  }else if(k==='antidote'){
+    used.antidote=1;
+    if(g.inf[t]!=null){delete g.inf[t];note(S,pid,`${nm(S,t)} 已解毒`)}else note(S,pid,`${nm(S,t)} 並未感染，解毒劑浪費了`);
+  }else if(k==='check'){
+    ru.check=1;note(S,pid,`查驗結果：${nm(S,t)} 是「${VR[g.roles[t]].n}」`);
+  }else if(k==='research'){
+    ru.research=1;const ok=t===g.antibody,to=know?vTeam(S,'R'):[pid];
+    if(ok&&!g.cureRound){g.cure++;g.cureRound=true;
+      to.forEach(id=>note(S,id,`製藥成功：${nm(S,t)} 是抗體保有者（進度 ${g.cure}/2）`));
+      if(g.cure>=2){pub(S,'解毒劑製造完成');vFinish(S,'citizen','解毒劑製成',true)}
+    }else to.forEach(id=>note(S,id,ok?`${nm(S,t)} 是抗體保有者，但本回合已經有人成功過一次`:`製藥失敗：${nm(S,t)} 不是抗體保有者`));
+  }
+}
+function vUse(S,pid,k,t){const e=vCan(S,pid,k,t);if(e)return e;vApply(S,pid,k,t)}
+function vAct(S,pid,a){
+  if(!SKN[a.k])return'未知的操作';
+  if(S.opts.verify==='3d'&&a.t!==pid)return'要先在場景裡走到他旁邊，做出指定動作';
+  return vUse(S,pid,a.k,a.t);
+}
+function vNext(S){
+  const g=S.g;
+  if(g.round===0){g.round=1;g.roundStart=Date.now();pub(S,'第 1 回合開始');return}
+  const r=g.round,ids=S.players.map(p=>p.id).filter(id=>g.alive[id]).sort((a,b)=>g.num[a]-g.num[b]);
+  const fresh=[];
+  ids.forEach((id,i)=>{if(g.inf[id]!=null&&ids.length>1){const nx=ids[(i+1)%ids.length];if(g.inf[nx]==null&&!fresh.includes(nx))fresh.push(nx)}});
+  for(const id of ids)if(g.inf[id]!=null&&id!==g.antibody&&r-g.inf[id]+1>=S.opts.deathDelay)vKill(S,id,'病毒發作');
+  if(g.inf[g.antibody]!=null&&g.inf[g.antibody]<=r)delete g.inf[g.antibody];
+  fresh.forEach(id=>{if(g.alive[id])g.inf[id]=r+1});
+  const all=S.players.map(p=>p.id);
+  g.stats={inf:all.filter(id=>g.alive[id]&&g.inf[id]!=null).length,dead:all.filter(id=>g.deathRound[id]===r).length,cure:g.cure};
+  pub(S,`第 ${r} 回合結束：目前感染 ${g.stats.inf} 人，本回合死亡 ${g.stats.dead} 人，解毒劑進度 ${g.cure}/2`);
+  vCheck(S);if(S.phase!=='play')return;
+  if(r>=S.opts.rounds){vFinish(S,'none',`${S.opts.rounds} 回合結束，兩個陣營都沒達成條件`);return}
+  g.round=r+1;g.roundStart=Date.now();g.cureRound=false;all.forEach(id=>g.ru[id]={x:0});
+  pub(S,`第 ${g.round} 回合開始`);
+  if(g.cure===1&&!g.announced){g.announced=true;pub(S,'公告：解毒劑製造準備中')}
+}
+function vCheck(S){
+  if(S.phase!=='play')return;const g=S.g,all=S.players.map(p=>p.id);
+  if(!all.some(id=>g.roles[id]==='T'&&g.alive[id])){vFinish(S,'citizen','恐怖分子全滅');return}
+  if(!all.some(id=>g.roles[id]!=='T'&&id!==g.antibody&&g.alive[id]))vFinish(S,'terror','除抗體保有者外，其餘玩家全數死亡');
+}
+function vFinish(S,winner,why,byCure){
+  const g=S.g,rw={},tDead=!S.players.some(p=>g.roles[p.id]==='T'&&g.alive[p.id]);
+  S.players.forEach(({id})=>{const r=g.roles[id],al=g.alive[id]?1:0;let n=0;
+    if(r==='T')n=winner==='terror'?4:0;
+    else if(r==='C'||r==='J')n=winner==='citizen'?1+al:0;
+    else if(r==='R')n=winner==='citizen'?1+al+(byCure?1:0):0;
+    else if(r==='I')n=tDead?[4,4,3,2,1][Math.min(g.round,5)-1]:0;
+    else if(r==='F')n=g.alive[id]?0:([3,2,2,1,0][Math.min(g.deathRound[id]||5,5)-1]);
+    rw[id]=n});
+  S.phase='over';S.result={winner,why,rw,title:{citizen:'市民陣營獲勝',terror:'恐怖分子獲勝',none:'無陣營獲勝'}[winner]};
+  pub(S,`遊戲結束：${S.result.title}（${why}）`);
+}
+
+/* ============ 地鐵追捕 ============ */
+const LINES=[
+  {c:'#e2594c',p:[[0,3],[1,3],[2,3],[3,3],[4,3],[5,3],[6,3],[7,3]]},
+  {c:'#5c9eea',p:[[2,0],[2,1],[2,2],[2,3],[2,4],[2,5],[2,6]]},
+  {c:'#68ba6f',p:[[5,0],[5,1],[5,2],[5,3],[5,4],[5,5],[5,6]]},
+  {c:'#e8a33d',p:[[1,1],[2,1],[3,1],[4,1],[5,1],[6,1]]},
+  {c:'#ab93dc',p:[[1,5],[2,5],[3,5],[4,5],[5,5],[6,5]]},
+  {c:'#52b8a8',p:[[1,1],[0,2],[0,3],[0,4],[1,5]]},
+  {c:'#d98cb3',p:[[6,1],[7,2],[7,3],[7,4],[6,5]]}
+];
+const SNAMES=['松原','霧港','青石','白橋','北門','鹿野','星塘','竹林','南灣','雲頂','河口','鐵坊','茶山','月台','柳岸','石鼓','金礦','東圳','西濱','梅林','燈塔','古井','風口','稻田','銀杏','海角','赤土','麥倉','泉眼','烏橋','蘆塘','雁門'];
+const ST=[],ADJ={};{const ix={};
+  for(const L of LINES){let prev=null;for(const [x,y] of L.p){const k=x+','+y;if(ix[k]==null){ix[k]=ST.length;ST.push({id:ST.length,x:x*50+28,y:y*54+26,n:SNAMES[ST.length]});ADJ[ix[k]]=[]}
+    const id=ix[k];if(prev!=null&&!ADJ[id].includes(prev)){ADJ[id].push(prev);ADJ[prev].push(id)}prev=id}L.ids=L.p.map(([x,y])=>ix[x+','+y])}}
+const TEAMS=['紅隊','藍隊','綠隊'];
+function cComp(n){const th=n>=8?2:1,cops=n-th,teams=cops>=6?3:cops>=4?2:1,cor=cops>=9?2:cops>=4?1:0;return{th,cops,teams,cor}}
+function cDeal(S){
+  const ids=shuffle(S.players.map(p=>p.id)),c=cComp(ids.length);
+  const g=S.g={round:1,stage:'thief',order:[],roles:{},team:{},pos:{},trail:{x:0},loot:{x:0},got:0,arrested:{x:0},arrestBy:{x:0},budget:{},done:{x:0},marks:{},accuse:{x:0}};
+  for(let i=0;i<c.teams;i++){g.order.push(i);g.marks['t'+i]=[]}
+  const th=ids.slice(0,c.th),cops=ids.slice(c.th);
+  th.forEach(id=>g.roles[id]='thief');
+  cops.forEach((id,i)=>{g.roles[id]='cop';g.team[id]=i%c.teams});
+  const tsh=shuffle([...g.order]);for(let i=0;i<c.cor;i++){const m=cops.filter(id=>g.team[id]===tsh[i]);g.roles[m[rnd(m.length)]]='corrupt'}
+  const spots=shuffle(ST.map(s=>s.id));
+  ids.forEach((id,i)=>g.pos[id]=spots[i]);
+  th.forEach(id=>g.trail['s'+g.pos[id]]=1);
+  shuffle(ST.map(s=>s.id).filter(s=>!th.some(id=>g.pos[id]===s))).slice(0,10).forEach(s=>g.loot['s'+s]=1);
+  cSetup(S);
+  pub(S,`小偷是 ${th.map(id=>nm(S,id)).join('、')}。第 1 回合開始，小偷先行動。`);
+}
+function cActive(S){const g=S.g,all=S.players.map(p=>p.id);
+  if(g.stage==='thief')return all.filter(id=>g.roles[id]==='thief'&&!g.arrested[id]);
+  const t=g.order[g.stage];return all.filter(id=>g.roles[id]!=='thief'&&g.team[id]===t)}
+function cSetup(S){const g=S.g;g.done={x:0};g.budget={};cActive(S).forEach(id=>g.budget[id]={m:2,a:2})}
+function cStageName(S){const g=S.g;return g.stage==='thief'?'小偷':TEAMS[g.order[g.stage]]}
+function cAdvance(S,forced){
+  const g=S.g;
+  if(g.stage==='thief')g.stage=0;else g.stage++;
+  if(g.stage>=g.order.length){
+    if(g.round>=S.opts.maxRounds){cFinish(S,'none',`${S.opts.maxRounds} 回合用盡`);return}
+    g.round++;g.order.push(g.order.shift());g.stage='thief';pub(S,`第 ${g.round} 回合開始，小偷先行動`);
+  }
+  cSetup(S);if(!cActive(S).length)cAdvance(S);
+}
+function cAct(S,pid,a){
+  const g=S.g,role=g.roles[pid];if(!role)return'你不在本局';
+  if(a.k==='accuse'){
+    if(role==='thief')return'小偷不能指認';if(a.t===pid||g.team[a.t]!==g.team[pid]||g.roles[a.t]==='thief')return'只能指認同隊隊友';
+    g.accuse[pid]=a.t;note(S,pid,`你指認 ${nm(S,a.t)} 是內鬼（結算前可更改）`);return}
+  if(!cActive(S).includes(pid))return'還沒輪到你';
+  if(g.done[pid])return'你本回合已結束行動';
+  const b=g.budget[pid],here=g.pos[pid];
+  if(a.k==='move'){
+    if(b.m<1)return'移動次數用完';if(!ADJ[here].includes(a.to))return'只能移動到相鄰的站';
+    g.pos[pid]=a.to;b.m--;
+    if(role==='thief'){g.trail['s'+a.to]=1;
+      if(g.loot['s'+a.to]){delete g.loot['s'+a.to];g.got++;pub(S,`小偷取得第 ${g.got} 件贓物（目標 ${S.opts.lootGoal} 件）`);
+        if(g.got>=S.opts.lootGoal){cFinish(S,'thief','贓物收集完成');return}}}
+  }else if(a.k==='investigate'||a.k==='arrest'){
+    if(role==='thief')return'小偷不能這麼做';if(b.a<1)return'行動次數用完';b.a--;
+    const team=S.players.map(p=>p.id).filter(id=>g.roles[id]!=='thief'&&g.team[id]===g.team[pid]);
+    if(a.k==='investigate'){const hit=g.trail['s'+here]?1:0;g.marks['t'+g.team[pid]].push({s:here,r:g.round,hit});
+      team.forEach(id=>note(S,id,`${nm(S,pid)} 調查「${ST[here].n}」：${hit?'小偷來過':'沒有痕跡'}`))}
+    else{const caught=S.players.map(p=>p.id).filter(id=>g.roles[id]==='thief'&&!g.arrested[id]&&g.pos[id]===here);
+      if(caught.length){caught.forEach(id=>{g.arrested[id]=1;g.arrestBy[id]=pid;pub(S,`${nm(S,id)} 在「${ST[here].n}」被 ${nm(S,pid)} 逮捕`)});
+        if(!S.players.some(p=>g.roles[p.id]==='thief'&&!g.arrested[p.id])){cFinish(S,'cop','小偷全數落網');return}}
+      else team.forEach(id=>note(S,id,`${nm(S,pid)} 在「${ST[here].n}」逮捕落空`))}
+  }else if(a.k==='done'){g.done[pid]=1}
+  else return'未知的操作';
+  if(S.phase==='play'&&cActive(S).every(id=>g.done[id]))cAdvance(S);
+}
+function cFinish(S,winner,why){
+  const g=S.g,rw={};
+  S.players.forEach(({id})=>{const r=g.roles[id];let n=0;
+    if(winner==='thief'&&r!=='cop')n=3;
+    if(r==='cop'){if(winner==='cop')n+=1;n+=2*Object.keys(g.arrestBy).filter(k=>g.arrestBy[k]===id).length;
+      if(g.accuse[id]&&g.roles[g.accuse[id]]==='corrupt')n+=1}
+    rw[id]=n});
+  S.phase='over';S.result={winner,why,rw,title:{thief:'小偷與內鬼獲勝',cop:'警察獲勝',none:'無人獲勝'}[winner]};
+  pub(S,`遊戲結束：${S.result.title}（${why}）`);
+}
+
+
+/* What one player is allowed to know. The server sends this instead of the full state. */
+function redact(S,pid){
+  const V=clone(S);delete V.ack;V.priv={};if(S.priv[pid])V.priv[pid]=S.priv[pid];
+  const g=S.g,over=S.phase==='over',mine=(S.groups||[]).filter(G=>G.m.includes(pid)),gids=mine.map(G=>G.id);
+  let tk='';if(g&&S.game==='chase'&&g.roles[pid])tk=g.roles[pid]==='thief'?'#th':'#t'+g.team[pid];
+  V.groups=mine;V.chat=(S.chat||[]).filter(m=>!m.to||m.f===pid||m.to===pid||gids.includes(m.to)||(tk&&m.to===tk));
+  if(!g||over)return V;
+  const v=V.g,role=g.roles[pid];
+  if(S.game==='virus'){
+    const know=S.opts.knowMates&&(role==='T'||role==='R');
+    for(const id in g.roles)if(!(id===pid||!g.alive[id]||(know&&g.roles[id]===role)))v.roles[id]='?';
+    v.num={};if(role)v.num[pid]=g.num[pid];v.antibody=g.antibody===pid?pid:'';v.inf={x:0};
+    v.task={};if(g.task[pid])v.task[pid]=g.task[pid];
+    v.used={};v.used[pid]=g.used[pid]||{x:0};v.ru={};v.ru[pid]=g.ru[pid]||{x:0};
+    if(role!=='T')v.virusUsed=false;
+    v.cure=g.stats.cure;v.cureRound=false;
+  }else{
+    const see=role==='thief'||role==='corrupt';
+    for(const id in g.roles){if(g.roles[id]==='corrupt'&&!see&&id!==pid)v.roles[id]='cop';if(g.roles[id]==='thief'&&!see)v.pos[id]=-1}
+    if(role!=='thief')v.loot={x:0};
+    v.trail={x:0};v.marks={};if(role&&role!=='thief')v.marks['t'+g.team[pid]]=g.marks['t'+g.team[pid]]||[];
+    v.accuse={x:0};if(g.accuse[pid])v.accuse[pid]=g.accuse[pid];
+  }
+  return V;
+}
+
+const AX={GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,vUse,ST,ADJ,LINES,TEAMS,cActive,cStageName,redact,clone,rnd};
+if(typeof module!=='undefined'&&module.exports)module.exports=AX;else window.AX=AX;
+})();
