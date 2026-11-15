@@ -12,7 +12,7 @@ const GAMES={
 function newState(game,hostId,code){return{v:1,code,game,hostId,phase:'lobby',players:[],kicked:{},
   opts:{deathDelay:2,rounds:5,roundMin:30,lootGoal:6,maxRounds:15,verify:'3d',knowMates:0},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
 const nm=(S,id)=>{const p=S.players.find(p=>p.id===id);return p?p.name:'？'};
-function pub(S,t){S.pub.push({r:S.g?S.g.round:0,t});if(S.pub.length>150)S.pub.shift()}
+function pub(S,t){S.pubN=(S.pubN||0)+1;S.pub.push({r:S.g?S.g.round:0,t});if(S.pub.length>150)S.pub.shift()}
 function note(S,id,t){(S.priv[id]=S.priv[id]||[]).push({r:S.g.round,t})}
 
 function act(S,pid,a,isHost){
@@ -58,9 +58,9 @@ function act(S,pid,a,isHost){
 const VR={
   T:{n:'恐怖分子',f:'恐怖分子陣營',c:'threat',d:['病毒：全隊只有一次，指定 1 人感染','子彈：你個人一次，立刻擊殺 1 人','解毒劑：你個人一次，治好 1 名感染者（可用在自己）','勝利：至少一名恐怖分子存活，其餘玩家除抗體保有者外全部死亡']},
   C:{n:'一般市民',f:'市民陣營',c:'safe',d:['沒有主動技能','勝利：恐怖分子全滅，或解毒劑製成']},
-  R:{n:'研究員',f:'市民陣營',c:'safe',d:['製藥：每回合指定 1 名受試者；對方是抗體保有者才成功','全隊每回合最多成功 1 次，累計 2 次解毒劑完成，市民立刻獲勝','第 1 次成功後，下一回合會全場公告「製造準備中」']},
-  J:{n:'記者',f:'市民陣營',c:'safe',d:['查驗：每回合確認 1 名玩家的角色','看不出對方有沒有抗體']},
-  I:{n:'搜查官',f:'中立',c:'neutral',d:['子彈：每回合可擊殺 1 人','勝利：恐怖分子全部死亡；越早達成獎勵越高']},
+  R:{n:'研究員',f:'市民陣營',c:'safe',d:['製藥：每日指定 1 名受試者；對方是抗體保有者才成功','全隊每日最多成功 1 次，累計 2 次解毒劑完成，市民立刻獲勝','第 1 次成功後，下一日會全場公告「製造準備中」']},
+  J:{n:'記者',f:'市民陣營',c:'safe',d:['查驗：每日確認 1 名玩家的角色','看不出對方有沒有抗體']},
+  I:{n:'搜查官',f:'中立',c:'neutral',d:['子彈：每日可擊殺 1 人','勝利：恐怖分子全部死亡；越早達成獎勵越高']},
   F:{n:'狂熱分子',f:'中立',c:'neutral',d:['沒有主動技能','勝利：自己死亡；越早死獎勵越高']}
 };
 const GN=['挽手臂','握手','擊掌','碰拳','搭肩','比槍','遞東西','碰杯','鞠躬','猜拳','拍背','勾小指'];
@@ -79,7 +79,8 @@ function vDeal(S){
   const cs=ids.filter(id=>g.roles[id]==='C');g.antibody=cs[rnd(cs.length)];
   g.task={};
   ids.forEach(id=>{const pool=shuffle(TASKS.map((_,i)=>i));g.task[id]={x:0};(VSK[g.roles[id]]||[]).forEach((k,i)=>g.task[id][k]=pool[i])});
-  pub(S,'身分已發下。自由交談時間，房主開始第 1 回合後技能才能使用。');
+  pub(S,`本局共 ${ids.length} 人：${[['T','恐怖分子'],['R','研究員'],['J','記者'],['I','搜查官'],['F','狂熱分子'],['C','一般市民']].filter(([k])=>c[k]>0).map(([k,n])=>n+' '+c[k]+' 人').join('、')}。其中一位市民是抗體保有者。`);
+  pub(S,'身分已發下。自由交談時間，房主開始第 1 日後技能才能使用。');
 }
 function vTeam(S,r){return S.players.map(p=>p.id).filter(id=>S.g.roles[id]===r)}
 function vKill(S,t,cause){const g=S.g;g.alive[t]=false;g.deathRound[t]=g.round;delete g.inf[t];
@@ -87,14 +88,14 @@ function vKill(S,t,cause){const g=S.g;g.alive[t]=false;g.deathRound[t]=g.round;d
 function vCan(S,pid,k,t){
   const g=S.g,role=g.roles[pid],used=g.used[pid]||{},ru=g.ru[pid]||{};
   if(!role||!g.alive[pid])return'你已出局';
-  if(g.round<1)return'第 1 回合尚未開始';
+  if(g.round<1)return'第 1 日尚未開始';
   if(!g.alive[t])return'目標已經死亡';
   if(k!=='antidote'&&t===pid)return'不能選自己';
   if(k==='infect')return role!=='T'?'你沒有這個技能':g.virusUsed?'病毒已經被用掉了':null;
-  if(k==='shoot')return role==='T'?(used.bullet?'子彈已用完':null):role==='I'?(ru.bullet?'本回合已開過槍':null):'你沒有子彈';
+  if(k==='shoot')return role==='T'?(used.bullet?'子彈已用完':null):role==='I'?(ru.bullet?'本日已開過槍':null):'你沒有子彈';
   if(k==='antidote')return role!=='T'?'你沒有這個技能':used.antidote?'解毒劑已用完':null;
-  if(k==='check')return role!=='J'?'你沒有這個技能':ru.check?'本回合已查驗過':null;
-  if(k==='research')return role!=='R'?'你沒有這個技能':ru.research?'本回合已試過':null;
+  if(k==='check')return role!=='J'?'你沒有這個技能':ru.check?'本日已查驗過':null;
+  if(k==='research')return role!=='R'?'你沒有這個技能':ru.research?'本日已試過':null;
   return'未知的操作';
 }
 function vApply(S,pid,k,t){
@@ -115,7 +116,7 @@ function vApply(S,pid,k,t){
     if(ok&&!g.cureRound){g.cure++;g.cureRound=true;
       to.forEach(id=>note(S,id,`製藥成功：${nm(S,t)} 是抗體保有者（進度 ${g.cure}/2）`));
       if(g.cure>=2){pub(S,'解毒劑製造完成');vFinish(S,'citizen','解毒劑製成',true)}
-    }else to.forEach(id=>note(S,id,ok?`${nm(S,t)} 是抗體保有者，但本回合已經有人成功過一次`:`製藥失敗：${nm(S,t)} 不是抗體保有者`));
+    }else to.forEach(id=>note(S,id,ok?`${nm(S,t)} 是抗體保有者，但本日已經有人成功過一次`:`製藥失敗：${nm(S,t)} 不是抗體保有者`));
   }
 }
 function vUse(S,pid,k,t){const e=vCan(S,pid,k,t);if(e)return e;vApply(S,pid,k,t)}
@@ -126,7 +127,7 @@ function vAct(S,pid,a){
 }
 function vNext(S){
   const g=S.g;
-  if(g.round===0){g.round=1;g.roundStart=Date.now();pub(S,'第 1 回合開始');return}
+  if(g.round===0){g.round=1;g.roundStart=Date.now();pub(S,'第 1 日開始');return}
   const r=g.round,ids=S.players.map(p=>p.id).filter(id=>g.alive[id]).sort((a,b)=>g.num[a]-g.num[b]);
   const fresh=[];
   ids.forEach((id,i)=>{if(g.inf[id]!=null&&ids.length>1){const nx=ids[(i+1)%ids.length];if(g.inf[nx]==null&&!fresh.includes(nx))fresh.push(nx)}});
@@ -135,11 +136,11 @@ function vNext(S){
   fresh.forEach(id=>{if(g.alive[id])g.inf[id]=r+1});
   const all=S.players.map(p=>p.id);
   g.stats={inf:all.filter(id=>g.alive[id]&&g.inf[id]!=null).length,dead:all.filter(id=>g.deathRound[id]===r).length,cure:g.cure};
-  pub(S,`第 ${r} 回合結束：目前感染 ${g.stats.inf} 人，本回合死亡 ${g.stats.dead} 人，解毒劑進度 ${g.cure}/2`);
+  pub(S,`第 ${r} 日結束：目前感染 ${g.stats.inf} 人，本日死亡 ${g.stats.dead} 人，解毒劑進度 ${g.cure}/2`);
   vCheck(S);if(S.phase!=='play')return;
-  if(r>=S.opts.rounds){vFinish(S,'none',`${S.opts.rounds} 回合結束，兩個陣營都沒達成條件`);return}
+  if(r>=S.opts.rounds){vFinish(S,'none',`${S.opts.rounds} 日結束，兩個陣營都沒達成條件`);return}
   g.round=r+1;g.roundStart=Date.now();g.cureRound=false;all.forEach(id=>g.ru[id]={x:0});
-  pub(S,`第 ${g.round} 回合開始`);
+  pub(S,`第 ${g.round} 日開始`);
   if(g.cure===1&&!g.announced){g.announced=true;pub(S,'公告：解毒劑製造準備中')}
 }
 function vCheck(S){

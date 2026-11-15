@@ -86,7 +86,10 @@ function onMsg(c,m){
     const S=R.S,inList=S.players.some(p=>p.id===pid),key=String(m.key||'');
     if(R.keys[pid]!==undefined&&R.keys[pid]!==key){wsSend(c.sock,{t:'err',m:'這個座位屬於另一台裝置',fatal:1});return}
     R.keys[pid]=key;
-    if(!inList&&S.phase==='lobby'&&!S.kicked[pid])E.act(S,null,{k:'add',id:pid,name:clean(m.name)||'玩家'},true);
+    if(!inList&&S.phase==='lobby'){
+      if(S.kicked[pid]){wsSend(c.sock,{t:'err',m:'你已被房主移出這個房間',fatal:1});return}
+      const e=E.act(S,null,{k:'add',id:pid,name:clean(m.name)||'玩家'},true);
+      if(e){wsSend(c.sock,{t:'err',m:'這個房間已經滿了（16 人）',fatal:1});return}}
     bind(c,R,pid);pushState(R);wsSend(c.sock,{t:'voice',list:[...R.voice].filter(id=>R.cl.has(id)),ice:ICE});
     if(S.phase!=='lobby'&&S.game==='virus')wsSend(c.sock,{t:'pos',p:posList(R,Object.keys(R.pos)),init:1});return}
   const R=c.room;if(!R||!c.pid)return;const S=R.S,pid=c.pid;
@@ -126,7 +129,7 @@ setInterval(()=>{
           if(task===q.gi){const e=E.vUse(S,pid,q.gk,q.gt);if(e)msg='沒有發動：'+e;else{fired=true;changed=true}}}
         const c=R.cl.get(pid);if(c)wsSend(c.sock,{t:'gdone',fired,k:q.gk,m:msg});
       }
-      if(S.phase==='play'&&S.g.round>=1&&now>=S.g.roundStart+ROUND_MS(S)){const r=S.g.round;E.act(S,null,{k:'next'},true);pushState(R,`第 ${r} 回合時間到，已自動結算`);changed=false}
+      if(S.phase==='play'&&S.g.round>=1&&now>=S.g.roundStart+ROUND_MS(S)){const r=S.g.round;E.act(S,null,{k:'next'},true);pushState(R,`第 ${r} 日時間到，已自動結算`);changed=false}
       if(changed)pushState(R);
       if(S.phase==='play')for(const id in R.pos)if(!S.g.alive[id]&&R.pos[id].gi>=0){R.pos[id].gi=-1;R.dirty.add(id)}
     }
