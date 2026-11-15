@@ -10,7 +10,7 @@ const GAMES={
   chase:{name:'地鐵追捕',min:5,max:14,ds:'小偷在路線圖上隱藏移動收集贓物，三隊警察調查與逮捕，隊裡藏著內鬼。'}
 };
 function newState(game,hostId,code){return{v:1,code,game,hostId,phase:'lobby',players:[],kicked:{},
-  opts:{deathDelay:2,rounds:5,roundMin:30,lootGoal:6,maxRounds:15,verify:'3d',knowMates:0},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
+  opts:{deathDelay:2,rounds:5,roundMin:30,lootGoal:6,maxRounds:15,verify:'3d',knowMates:0,briefSec:60},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
 const nm=(S,id)=>{const p=S.players.find(p=>p.id===id);return p?p.name:'？'};
 function pub(S,t){S.pubN=(S.pubN||0)+1;S.pub.push({r:S.g?S.g.round:0,t});if(S.pub.length>150)S.pub.shift()}
 function note(S,id,t){(S.priv[id]=S.priv[id]||[]).push({r:S.g.round,t})}
@@ -38,7 +38,7 @@ function act(S,pid,a,isHost){
     G.m=G.m.filter(id=>id!==pid);if(G.m.length<2)S.groups=S.groups.filter(x=>x!==G);return}
   if(['opt','game','start','next','again','kick','add'].includes(a.k)){
     if(!isHost)return'只有房主可以操作';
-    if(a.k==='next'){if(S.phase!=='play')return'遊戲未在進行';return S.game==='virus'?vNext(S):cAdvance(S,true)}
+    if(a.k==='next'){if(S.phase!=='play')return'遊戲未在進行';if(S.game==='chase'&&S.g.briefEnd)return briefDone(S);return S.game==='virus'?vNext(S):cAdvance(S,true)}
     if(a.k==='again'){S.phase='lobby';S.g=null;S.result=null;S.pub=[];S.priv={};S.chat=[];S.groups=[];return}
     if(S.phase!=='lobby')return'遊戲已開始';
     if(a.k==='opt'){const ok={deathDelay:[1,2],roundMin:[5,10,15,30],lootGoal:[5,6,7],verify:['3d','none'],knowMates:[0,1]}[a.o];if(!ok||!ok.includes(a.v))return'不支援的設定';S.opts[a.o]=a.v;return}
@@ -80,7 +80,8 @@ function vDeal(S){
   g.task={};
   ids.forEach(id=>{const pool=shuffle(TASKS.map((_,i)=>i));g.task[id]={x:0};(VSK[g.roles[id]]||[]).forEach((k,i)=>g.task[id][k]=pool[i])});
   pub(S,`本局共 ${ids.length} 人：${[['T','恐怖分子'],['R','研究員'],['J','記者'],['I','搜查官'],['F','狂熱分子'],['C','一般市民']].filter(([k])=>c[k]>0).map(([k,n])=>n+' '+c[k]+' 人').join('、')}。其中一位市民是抗體保有者。`);
-  pub(S,'身分已發下。自由交談時間，房主開始第 1 日後技能才能使用。');
+  g.briefEnd=S.opts.briefSec>0?Date.now()+S.opts.briefSec*1000:0;
+  pub(S,g.briefEnd?`身分已發下。請在 ${S.opts.briefSec} 秒內閱讀自己的身分說明，不要讓別人看到你的畫面。時間到自動開始第 1 日。`:'身分已發下。房主開始第 1 日後技能才能使用。');
 }
 function vTeam(S,r){return S.players.map(p=>p.id).filter(id=>S.g.roles[id]===r)}
 function vKill(S,t,cause){const g=S.g;g.alive[t]=false;g.deathRound[t]=g.round;delete g.inf[t];
@@ -127,7 +128,7 @@ function vAct(S,pid,a){
 }
 function vNext(S){
   const g=S.g;
-  if(g.round===0){g.round=1;g.roundStart=Date.now();pub(S,'第 1 日開始');return}
+  if(g.round===0){g.round=1;g.briefEnd=0;g.roundStart=Date.now();pub(S,'第 1 日開始');return}
   const r=g.round,ids=S.players.map(p=>p.id).filter(id=>g.alive[id]).sort((a,b)=>g.num[a]-g.num[b]);
   const fresh=[];
   ids.forEach((id,i)=>{if(g.inf[id]!=null&&ids.length>1){const nx=ids[(i+1)%ids.length];if(g.inf[nx]==null&&!fresh.includes(nx))fresh.push(nx)}});
@@ -190,8 +191,11 @@ function cDeal(S){
   th.forEach(id=>g.trail['s'+g.pos[id]]=1);
   shuffle(ST.map(s=>s.id).filter(s=>!th.some(id=>g.pos[id]===s))).slice(0,10).forEach(s=>g.loot['s'+s]=1);
   cSetup(S);
-  pub(S,`小偷是 ${th.map(id=>nm(S,id)).join('、')}。第 1 回合開始，小偷先行動。`);
+  g.briefEnd=S.opts.briefSec>0?Date.now()+S.opts.briefSec*1000:0;
+  pub(S,g.briefEnd?`身分已發下。小偷是 ${th.map(id=>nm(S,id)).join('、')}。請在 ${S.opts.briefSec} 秒內閱讀自己的身分說明，時間到後第 1 回合開始。`:`小偷是 ${th.map(id=>nm(S,id)).join('、')}。第 1 回合開始，小偷先行動。`);
 }
+/* the identity briefing is over: the game proper starts */
+function briefDone(S){const g=S.g;if(!g||!g.briefEnd)return;if(S.game==='virus')return vNext(S);g.briefEnd=0;pub(S,'身分確認結束。第 1 回合開始，小偷先行動。')}
 function cActive(S){const g=S.g,all=S.players.map(p=>p.id);
   if(g.stage==='thief')return all.filter(id=>g.roles[id]==='thief'&&!g.arrested[id]);
   const t=g.order[g.stage];return all.filter(id=>g.roles[id]!=='thief'&&g.team[id]===t)}
@@ -208,6 +212,7 @@ function cAdvance(S,forced){
 }
 function cAct(S,pid,a){
   const g=S.g,role=g.roles[pid];if(!role)return'你不在本局';
+  if(g.briefEnd)return'身分確認時間還沒結束';
   if(a.k==='accuse'){
     if(role==='thief')return'小偷不能指認';if(a.t===pid||g.team[a.t]!==g.team[pid]||g.roles[a.t]==='thief')return'只能指認同隊隊友';
     g.accuse[pid]=a.t;note(S,pid,`你指認 ${nm(S,a.t)} 是內鬼（結算前可更改）`);return}
@@ -271,6 +276,6 @@ function redact(S,pid){
   return V;
 }
 
-const AX={GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,vUse,ST,ADJ,LINES,TEAMS,cActive,cStageName,redact,clone,rnd};
+const AX={briefDone,GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,vUse,ST,ADJ,LINES,TEAMS,cActive,cStageName,redact,clone,rnd};
 if(typeof module!=='undefined'&&module.exports)module.exports=AX;else window.AX=AX;
 })();

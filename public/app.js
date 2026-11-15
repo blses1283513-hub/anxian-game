@@ -57,6 +57,74 @@ Voice.send=o=>send(o);Voice.me=()=>myId;Voice.policy=vPolicy;Voice.canSpeak=canS
 setInterval(()=>{if(!S||mode!=='net')return;paintVoice();
   document.querySelectorAll('[data-sp]').forEach(e=>e.classList.toggle('sp',Voice.speaking(e.dataset.sp)));
   if(Stage3D)S.players.forEach(p=>Stage3D.speak(p.id,Voice.speaking(p.id)))},300);
+/* ---- identity briefing ---- */
+const isBrief=()=>!!(S&&S.phase==='play'&&S.g&&S.g.briefEnd>0);
+const TGT='任何一名其他存活玩家';
+const BR={
+  T:{skills:[['infect','投放病毒','全隊共用一次，誰先用掉就沒了',TGT,'對方被感染。每日結束時病毒傳給下一個號碼的存活玩家，感染到期的人死亡。'],
+      ['shoot','開槍','你個人一次',TGT,'對方立刻出局，身分公開。'],
+      ['antidote','解毒劑','你個人一次','任何一名存活玩家，包含自己','治好對方的感染。對沒被感染的人使用會浪費掉。用在自己身上不需要做動作。']],
+    win:'至少一名恐怖分子存活，其餘玩家除了抗體保有者以外全部死亡。',score:['恐怖分子獲勝：每名恐怖分子 4 枚','沒有獲勝：0 枚']},
+  C:{skills:[],win:'恐怖分子全部死亡，或研究員完成解毒劑。',score:['市民陣營獲勝：1 枚','結束時你還活著：再加 1 枚']},
+  R:{skills:[['research','製藥','每日一次',TGT,'對方是抗體保有者才算成功。全隊每日最多成功一次，累計兩次解毒劑完成，市民陣營立刻獲勝。']],
+    win:'恐怖分子全部死亡，或解毒劑完成。',score:['市民陣營獲勝：1 枚','結束時你還活著：再加 1 枚','因解毒劑完成而獲勝：再加 1 枚']},
+  J:{skills:[['check','查驗身分','每日一次',TGT,'只有你會得知對方的角色。看不出對方有沒有抗體。']],
+    win:'恐怖分子全部死亡，或研究員完成解毒劑。',score:['市民陣營獲勝：1 枚','結束時你還活著：再加 1 枚']},
+  I:{skills:[['shoot','開槍','每日一次',TGT,'對方立刻出局，身分公開。']],
+    win:'恐怖分子全部死亡。',score:['第 1 或第 2 日達成：4 枚','第 3 日：3 枚','第 4 日：2 枚','第 5 日：1 枚','恐怖分子沒有全滅：0 枚']},
+  F:{skills:[],win:'你自己死亡，越早越好。',score:['第 1 日死亡：3 枚','第 2 或第 3 日：2 枚','第 4 日：1 枚','第 5 日死亡或活到最後：0 枚']},
+  thief:{acts:[['移動','每回合最多 2 站','相鄰的車站','經過藏有贓物的站會自動拿走。你走過的每一站都會留下痕跡。']],
+    win:()=>`兩名小偷合計收集 ${S.opts.lootGoal} 件贓物。`,score:['小偷方獲勝：3 枚','被警察在同一站逮捕就出局，但隊友收集完成你仍然獲勝']},
+  cop:{acts:[['移動','每回合最多 2 站','相鄰的車站','警察的位置所有人都看得到。'],['調查','和逮捕合計每回合 2 次','你所在的車站','得知小偷是否曾經過這一站。結果只有同隊看得到。'],
+      ['逮捕','和調查合計每回合 2 次','你所在的車站','小偷此刻在這一站就會被捕；不在就落空。'],['指認內鬼','一次，結算前可以更改','一名同隊隊友','結算時揭曉對錯。']],
+    win:()=>'所有小偷都被逮捕。',score:['警察獲勝：1 枚','你每逮捕一名小偷：2 枚','指認內鬼正確：1 枚']},
+  corrupt:{acts:[['移動','每回合最多 2 站','相鄰的車站','表面上和警察一樣行動。'],['調查／逮捕','合計每回合 2 次','你所在的車站','結果同隊都看得到，可以故意浪費行動或誤導隊友。'],['情報','每回合','—','地圖上看得到小偷的位置；小偷也知道你是內鬼。']],
+    win:()=>`小偷收集到 ${S.opts.lootGoal} 件贓物。`,score:['小偷方獲勝：3 枚','警察獲勝：0 枚']}
+};
+function briefBody(){
+  const g=S.g,v=S.game==='virus',role=g.roles[me];let h='';
+  if(v){const B=BR[role],g3=S.opts.verify==='3d'&&mode==='net';if(!B)return'';
+    h+=`<h4>技能與目標</h4>`+(B.skills.length?B.skills.map(([k,n,lim,tg,ef])=>{const t=g3?vTask(S,me,k):null;
+      return`<div class="sk"><b>${n}</b>（${lim}）<ul><li>目標：${tg}</li><li>效果：${ef}</li>${t?`<li>施放條件：對目標「${t[0]}」，持續 3 秒</li>`:''}</ul></div>`}).join('')
+      :`<p>你沒有主動技能。${g3?'你可以對任何人做 12 種動作來試探或誤導別人，這些動作不會發動任何技能。':''}</p>`);
+    if(g.antibody===me)h+=`<div class="sk"><b>抗體</b><ul><li>你會被感染，也會把病毒傳給下一個號碼，但一日後自行痊癒，不會病死。</li><li>研究員要找到你才能製藥。恐怖分子獲勝時不需要你死亡。</li></ul></div>`;
+    if(B.skills.length)h+=`<h4>施放操作</h4>`+(g3?`<ol><li>在場景裡走到目標旁邊，大約兩步以內</li><li>按下技能按鈕，選擇對象</li><li>你的角色會做出指定動作，保持 3 秒不要移動</li><li>系統自動判定，達成就發動；中途移動或對方走遠要重來，技能不算用掉</li></ol><p>別人只看得到你的動作，不會收到任何通知。</p>`
+      :`<ol><li>按下技能按鈕</li><li>選擇對象並確定，立刻發動</li></ol>`);
+    h+=`<h4>你的號碼</h4><p>${g.num[me]} 號。病毒依號碼順序傳播，號碼只有你自己知道。</p>`;
+    h+=`<h4>獲勝條件</h4><p>${B.win}</p><h4>積分計算</h4><ul>${B.score.map(x=>`<li>${x}</li>`).join('')}</ul>`;
+  }else{const B=BR[role];if(!B)return'';
+    h+=`<h4>行動與目標</h4>`+B.acts.map(([n,lim,tg,ef])=>`<div class="sk"><b>${n}</b>（${lim}）<ul><li>目標：${tg}</li><li>效果：${ef}</li></ul></div>`).join('');
+    h+=`<h4>操作方式</h4><ol><li>每回合小偷先行動，接著各警隊依序行動</li><li>輪到你的陣營時，在行動面板選相鄰的車站移動，也可以直接點地圖上的車站</li>${role==='thief'?'':'<li>需要時按「調查」或「逮捕」，作用在你所在的站</li>'}<li>按「結束我的行動」</li></ol>`;
+    h+=`<h4>獲勝條件</h4><p>${B.win()}</p><h4>積分計算</h4><ul>${B.score.map(x=>`<li>${x}</li>`).join('')}</ul>`;
+  }
+  return h;
+}
+let shufT=0;
+function briefView(){
+  const g=S.g,v=S.game==='virus',role=g.roles[me]&&g.roles[me]!=='?'?g.roles[me]:null,all=S.players.map(p=>p.id);
+  const dealAt=g.briefEnd-S.opts.briefSec*1000,left=3000-(Date.now()+tOff-dealAt),still=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let h=topBar();
+  if(!role)h+=`<p class="note">這一局你是觀眾。其他人正在確認身分。</p>`;
+  else if(left>0&&!still){clearTimeout(shufT);shufT=setTimeout(render,left+40);
+    h+=`<section class="dossier shuffle"><span class="lbl">身分抽籤中</span><div class="role" id="shuf">？</div><p>每個人的身分都是隨機分配的，只有自己看得到。</p></section>`}
+  else{let top;
+    if(v){const R=VR[role],mates=S.opts.knowMates&&(role==='T'||role==='R')?vTeam(S,role).filter(id=>id!==me):[];
+      top=`<span class="stamp ${R.c}">${R.f}</span><span class="lbl">你抽到的身分</span><div class="role">${R.n}</div>${g.antibody===me?'<div><b>你同時是抗體保有者</b></div>':''}
+        ${mates.length?`<div>同伴：<b>${mates.map(id=>esc(nm(S,id))).join('、')}</b></div>`:(role==='T'||role==='R')&&!S.opts.knowMates?'<div>你不知道誰是同伴，要自己找出來。</div>':''}`}
+    else{const cor=all.filter(id=>g.roles[id]==='corrupt'),th=all.filter(id=>g.roles[id]==='thief'),mates=role==='thief'?[]:all.filter(id=>g.roles[id]!=='thief'&&g.team[id]===g.team[me]&&id!==me);
+      const I={thief:['小偷','threat','小偷陣營'],cop:['警察','safe','警察陣營'],corrupt:['內鬼','neutral','與小偷同盟']}[role];
+      top=`<span class="stamp ${I[1]}">${I[2]}</span><span class="lbl">你抽到的身分</span><div class="role">${I[0]}</div>
+        ${role!=='thief'?`<div>${TEAMS[g.team[me]]}${mates.length?'　隊友：<b>'+mates.map(id=>esc(nm(S,id))).join('、')+'</b>':''}</div>`:`<div>另一名小偷：<b>${th.filter(id=>id!==me).map(id=>esc(nm(S,id))).join('、')||'無'}</b></div>`}
+        ${role==='thief'&&cor.length?`<div>內鬼：<b>${cor.map(id=>esc(nm(S,id))+'（'+TEAMS[g.team[id]]+'）').join('、')}</b></div>`:''}
+        ${role==='corrupt'&&cor.length>1?`<div>另一名內鬼：<b>${cor.filter(id=>id!==me).map(id=>esc(nm(S,id))).join('、')}</b></div>`:''}`}
+    h+=`<section class="dossier brief">${top}${briefBody()}</section>
+      <p class="note">不要讓別人看到你的畫面。時間到會自動開始；開始後可以從身分卡的「完整身分說明」再打開這一頁。</p>`}
+  h+=`<section class="panel"><h3>場景載入中</h3><p class="sub">遊戲場景先在這裡準備好，開始後才能${v?'走動':'行動'}。</p>${stageSlot()}</section>`;
+  h+=hostCtl(ui.confirmNext?`<p class="sub">所有人都讀完了嗎？提早開始後就不能回到這一頁的倒數。</p><div class="row"><button class="btn pri grow" data-a="next">確定提早開始</button><button class="btn" data-a="cancel">取消</button></div>`
+    :`<p class="sub">時間到會自動開始。大家都說讀完了，可以提早開始。</p><button class="btn wide" data-a="asknext">提早開始</button>`);
+  return h+rulesHtml(S.game);
+}
+setInterval(()=>{const e=document.getElementById('shuf');if(!e||!S||!S.g)return;const names=S.game==='virus'?Object.values(VR).map(r=>r.n):['小偷','警察','內鬼'];e.textContent=names[rnd(names.length)]},110);
 /* ---- narrator ---- */
 let nPub=null;const cues={};
 function spoken(t){
@@ -86,10 +154,11 @@ function narrate(prev){
   nPub=N;
   if(S.game==='chase'&&S.phase==='play'){const g=S.g,pg=prev.phase==='play'&&prev.g?prev.g:null;
     if(pg&&g.round!==pg.round&&S.opts.maxRounds-g.round===2)say('注意，只剩最後三回合。');
-    if(!pg||g.stage!==pg.stage||g.round!==pg.round){if(pg&&g.stage!=='thief')say(`輪到${cStageName(S)}行動。`);if(me&&cActive(S).includes(me)&&!g.done[me])say('輪到你了。')}}
+    if(!g.briefEnd&&(!pg||pg.briefEnd||g.stage!==pg.stage||g.round!==pg.round)){if(pg&&!pg.briefEnd&&g.stage!=='thief')say(`輪到${cStageName(S)}行動。`);if(me&&cActive(S).includes(me)&&!g.done[me])say('輪到你了。')}}
   if(S.phase==='over'&&prev.phase==='play')say('所有人的身分已經公開，請看結算畫面。');
 }
 function timeCues(now){
+  if(isBrief()){const rem=Math.round((S.g.briefEnd-now)/1000),k=(S.gid||'')+'|brief';if(rem<=10&&rem>5&&!cues[k]){cues[k]=1;Narr.say('十秒後遊戲開始。')}return}
   if(!S||S.phase!=='play'||S.game!=='virus'||S.g.round<1)return;
   const total=S.opts.roundMin*60,rem=Math.round((S.g.roundStart+total*1000-now)/1000);
   for(const [th,msg] of [[300,'剩下五分鐘'],[60,'剩下一分鐘'],[10,'最後十秒']]){const k=(S.gid||'')+'|'+S.g.round+'|'+th;
@@ -99,6 +168,7 @@ function hudHtml(){
   const g=S.g,G=GAMES[S.game];let a,b;
   if(S.phase==='lobby'){a='等待玩家';b=`${S.players.length} 人・需要 ${G.min}–${G.max} 人`}
   else if(S.phase==='over'||!g){a='遊戲結束';b=S.result?esc(S.result.title):''}
+  else if(g.briefEnd){a='身分確認';b=`剩餘 <span id="hudclock" data-end="${g.briefEnd}">–</span> 後開始`}
   else if(S.game==='virus'){a=g.round>=1?`第 ${g.round} 日`:'準備階段';b=g.round>=1?`剩餘 <span id="hudclock" data-end="${g.roundStart+S.opts.roundMin*60000}">–</span>`:'第 1 日開始後計時'}
   else{a=`第 ${g.round} 回合`;b=`輪到${cStageName(S)}・共 ${S.opts.maxRounds} 回合`}
   return`<div class="hud" id="hud"><div class="hudrow"><span class="hudday">${a}</span><span class="hudtime">${b}</span><button class="btn sm ${Narr.isOn()&&Narr.supported()?'on':''}" data-a="narr" ${Narr.supported()?'':'disabled'}>${Narr.supported()?(Narr.isOn()?'旁白：開':'旁白：關'):'旁白僅字幕'}</button></div><div class="hudcap" id="hudcap" aria-live="polite">${esc(Narr.caption())}</div></div>`}
@@ -118,7 +188,7 @@ function go(a,asHost){
 function leave(){Voice.disable();nPub=null;Narr.clear();if(mode==='net')send({t:'leave'});wantRoom=null;S=null;mode=null;me=null;ui.cover=false;ui.pick=null;ls.del('ax_room');render()}
 function startLocal(resume){
   mode='local';me=null;wantRoom=null;
-  S=resume&&ls.get('ax_local')||newState(ui.game,null,'');S.opts.verify='none';
+  S=resume&&ls.get('ax_local')||newState(ui.game,null,'');S.opts.verify='none';S.opts.briefSec=0;
   ui.cover=S.phase!=='lobby';nPub=null;narrate(null);render();
 }
 
@@ -137,6 +207,7 @@ function rulesHtml(game){
     <li>所有人都能對任何人做這 12 種動作，但只有符合自己指定動作的那一次會發動技能。系統不會通知任何人誰做了什麼，只有剛好看到的人才知道；柱子和櫃子會擋住視線。</li>
     <li>開局沒有人知道別人的身分，同陣營也一樣。病毒全隊只有一份，誰先用掉就沒了。大廳可以改成同陣營互相知道。</li>
     <li>每日時間到會自動結算，房主也可以提早結束。</li>
+    <li>開局先隨機抽身分，接著有 60 秒的身分確認時間，畫面會列出你的技能、目標、施放條件、操作方式、獲勝條件和積分計算。時間到自動開始第 1 日，房主也可以提早開始。</li>
     <li>旁白會在開局、每日開始與結束、有人出局、倒數和結局時播報，同時顯示字幕。畫面上方可以關掉旁白聲音。</li>
     <li>語音：按「開啟語音通話」後可以直接說話。聲音跟著角色的距離，站得近聽得清楚，走遠就聽不見；想私下談就走到角落，別人也可以靠過來偷聽。死者自動靜音。</li>
     <li>文字交談：公開討論室所有人可見；可以一對一密談，也可以拉任意幾個人開群組，不限陣營。說謊、冒充身分都允許。死者不能發言。</li>
@@ -144,6 +215,7 @@ function rulesHtml(game){
     <li>本版調整：感染者本人不會收到通知；指定動作是本版自己設計的。</li></ul></details>`;
   return`<details><summary>地鐵追捕規則</summary><ul>
     <li>小偷身分公開，位置不公開。10 個站藏有贓物，只有小偷看得到；收集 ${o.lootGoal} 件小偷方獲勝。</li>
+    <li>開局先隨機抽身分，接著有 60 秒的身分確認時間，時間到自動開始，房主也可以提早開始。</li>
     <li>每回合小偷先動，接著各警隊依序行動，順序每回合輪換。最多 ${o.maxRounds} 回合。</li>
     <li>每人每回合最多移動 2 站。警察另有 2 次行動，都作用在自己所在的站：「調查」得知小偷是否來過，「逮捕」抓住此刻在這站的小偷。結果只有同隊看得到。</li>
     <li>內鬼是警察隊員，每回合都看得到小偷的位置；小偷知道誰是內鬼。</li>
@@ -273,6 +345,7 @@ function virusView(){
       ${mates.length?`<div>同伴：<b>${mates.map(id=>esc(nm(S,id))).join('、')}</b></div>`:(role==='T'||role==='R')&&!S.opts.knowMates?'<div>你不知道誰是同伴，要自己找出來。</div>':''}
       <ul>${R.d.map(d=>`<li>${d}</li>`).join('')}${g.antibody===me?'<li>抗體：你會被感染也會傳染，但一日後自行痊癒</li>':''}</ul>
       ${tasks.length?`<div class="lbl">指定動作（只有你知道）</div><ul>${tasks.map(([k,t])=>`<li>${SKN[k]}：對目標「${t[0]}」3 秒</li>`).join('')}</ul>`:''}
+      <details class="fullbrief"><summary>完整身分說明</summary>${briefBody()}</details>
       <div><button class="btn sm" data-a="hide">蓋住</button></div></section>`;
     if(g.alive[me]){
       const used=g.used[me]||{},ru=g.ru[me]||{},others=alive.filter(id=>id!==me),A=[];
@@ -344,7 +417,7 @@ function chaseView(){
       ${role!=='thief'?`<div>${TEAMS[g.team[me]]}${mates.length?'　隊友：<b>'+mates.map(id=>esc(nm(S,id))).join('、')+'</b>':''}</div>`:''}
       ${role==='thief'&&cor.length?`<div>內鬼：<b>${cor.map(id=>esc(nm(S,id))+'（'+TEAMS[g.team[id]]+'）').join('、')}</b></div>`:''}
       ${role==='corrupt'&&cor.length>1?`<div>另一名內鬼：<b>${cor.filter(id=>id!==me).map(id=>esc(nm(S,id))).join('、')}</b></div>`:''}
-      <ul>${info[3].map(d=>`<li>${d}</li>`).join('')}</ul><div><button class="btn sm" data-a="hide">蓋住</button></div></section>`;
+      <ul>${info[3].map(d=>`<li>${d}</li>`).join('')}</ul><details class="fullbrief"><summary>完整身分說明</summary>${briefBody()}</details><div><button class="btn sm" data-a="hide">蓋住</button></div></section>`;
     if(role!=='thief'&&mates.length){
       ui._acts=[['accuse','指認內鬼',mates]];
       h+=ui.pick?pickHtml():`<section class="panel"><h3>指認內鬼</h3><p class="sub">${g.accuse[me]?'目前指認：'+esc(nm(S,g.accuse[me]))+'。':'還沒指認。'}結算時揭曉，可以更改。</p><button class="btn" data-a="pick" data-v="accuse">選一名隊友</button></section>`;
@@ -385,6 +458,7 @@ function view(){
   if(mode==='local'&&(ui.cover||!me))return coverView();
   if(mode==='net'&&!S.g)return lobbyView();
   if(S.phase==='over')return overView();
+  if(isBrief())return briefView();
   return S.game==='virus'?virusView():chaseView();
 }
 function render(){
@@ -394,7 +468,7 @@ function render(){
   if(Stage3D&&Stage3D.el.parentNode)Stage3D.el.remove();
   ui._acts=[];app.innerHTML=view();
   const slot=document.getElementById('stage-slot');
-  if(Stage3D)Stage3D.walk=mode==='net';
+  if(Stage3D)Stage3D.walk=mode==='net'&&!isBrief();
   if(slot&&Stage3D&&S&&S.g)Stage3D.attach(slot,S,me,ui,(kind,id)=>{if(kind==='virus'){if(id===me)return;if(ui.pick&&ui.pick.targets.includes(id))H.target(id);else if(mode==='net'&&S.opts.verify==='3d'&&S.g.alive[id]!==false&&S.g.alive[me]){ui.ft=id;ui.fakeOpen=true;render()}}else H.st(id)});
   const nmg=document.getElementById('msgs');if(nmg)nmg.scrollTop=stick?nmg.scrollHeight:otop;
   paintVoice();
@@ -406,7 +480,7 @@ function tick(){
   if(S&&mode==='local'&&S.phase==='play'&&S.game==='virus'&&S.g.round>=1&&now>=S.g.roundStart+S.opts.roundMin*60000){
     const r=S.g.round,prev=JSON.parse(JSON.stringify(S));act(S,null,{k:'next'},true);ui.confirmNext=false;toast(`第 ${r} 日時間到，已自動結算`);narrate(prev);render();ls.set('ax_local',S);return}
   timeCues(now);
-  const hc=document.getElementById('hudclock');if(hc){const s=Math.max(0,Math.round((+hc.dataset.end-now)/1000));hc.textContent=`${Math.floor(s/60)} 分 ${String(s%60).padStart(2,'0')} 秒`;hc.classList.toggle('late',s<=60)}
+  const hc=document.getElementById('hudclock');if(hc){const s=Math.max(0,Math.round((+hc.dataset.end-now)/1000));hc.textContent=s>=60?`${Math.floor(s/60)} 分 ${String(s%60).padStart(2,'0')} 秒`:`${s} 秒`;hc.classList.toggle('late',s<=(isBrief()?10:60))}
   const c=document.getElementById('clock');if(!c)return;const end=+c.dataset.end;if(!end){c.textContent='–';return}
   const s=Math.max(0,Math.round((end-now)/1000));c.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');c.classList.toggle('late',s<=60)}
 setInterval(tick,1000);

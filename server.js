@@ -6,6 +6,7 @@ const E=require('./public/engine.js');
 const PORT=+process.env.PORT||3000,PUB=path.join(__dirname,'public');
 const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png'};
 const RANGE=1.9,HOLD=3000,ROOM_R=9.2;
+const BRIEF=process.env.BRIEF_SECONDS!==undefined?+process.env.BRIEF_SECONDS:null; // BRIEF_SECONDS is for testing only
 const ROUND_MS=S=>process.env.ROUND_SECONDS?+process.env.ROUND_SECONDS*1000:S.opts.roundMin*60000; // ROUND_SECONDS is for testing only
 
 const server=http.createServer((req,res)=>{
@@ -78,7 +79,7 @@ function onMsg(c,m){
   if(m.t==='create'){
     const pid=clean(m.pid);if(pid.length<6)return;
     let code;do{code=Array.from({length:4},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ'[crypto.randomInt(24)]).join('')}while(rooms.has(code));
-    const S=E.newState(E.GAMES[m.game]?m.game:'virus',pid,code);S.players.push({id:pid,name:clean(m.name)||'房主'});
+    const S=E.newState(E.GAMES[m.game]?m.game:'virus',pid,code);if(BRIEF!==null)S.opts.briefSec=BRIEF;S.players.push({id:pid,name:clean(m.name)||'房主'});
     const R={S,cl:new Map(),pos:{},dirty:new Set(),last:Date.now(),keys:{},voice:new Set()};R.keys[pid]=String(m.key||'');rooms.set(code,R);bind(c,R,pid);pushState(R);return}
   if(m.t==='join'){
     const pid=clean(m.pid),R=rooms.get(String(m.code||'').toUpperCase());if(pid.length<6)return;
@@ -117,6 +118,7 @@ setInterval(()=>{
   for(const [code,R] of rooms){
     const S=R.S;
     if(now-R.last>3*3600e3){rooms.delete(code);continue}
+    if(S.phase==='play'&&S.g&&S.g.briefEnd&&now>=S.g.briefEnd){E.briefDone(S);pushState(R)}
     if(S.phase==='play'&&S.game==='virus'){
       let changed=false;
       for(const pid in R.pos){const q=R.pos[pid];if(q.gi<0)continue;

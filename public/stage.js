@@ -136,7 +136,7 @@ window.Stage3D=(()=>{
   function stopGesture(silent){if(!gest)return;gest=null;gbar.hidden=true;if(!silent&&api.onStop)api.onStop()}
   function distTo(id){const p=peers[id];return p?Math.hypot(p.x-me3.x,p.z-me3.z):99}
   function stepRoom(dt,t){
-    const S=cur.S,me=cur.me,g=S.g,play=S.phase==='play',mine=synced&&figs[me]&&play&&g.alive[me]!==false;
+    const S=cur.S,me=cur.me,g=S.g,play=S.phase==='play',mine=synced&&api.walk!==false&&figs[me]&&play&&g.alive[me]!==false;
     if(mine){
       let jx=joy.x,jy=joy.y;if(keys.w||keys.arrowup)jy+=1;if(keys.s||keys.arrowdown)jy-=1;if(keys.a||keys.arrowleft)jx-=1;if(keys.d||keys.arrowright)jx+=1;
       const m=Math.hypot(jx,jy);
@@ -216,7 +216,7 @@ window.Stage3D=(()=>{
   let lastT=0;
   function frame(t){
     if(!el.isConnected){raf=0;return}raf=requestAnimationFrame(frame);
-    const dt=Math.min(.05,(t-lastT)/1000||0);lastT=t;
+    const dt=Math.min(.2,(t-lastT)/1000||0);lastT=t;   // walking speed must not depend on the frame rate
     if(kind==='virus')stepRoom(dt,t);
     else{for(const id in pawns){const p=pawns[id];p.m.position.lerp(p.to,.14);p.m.rotation.y=yaw}
       if(!still)dyn.children.forEach(o=>{if(o.userData.spin)o.rotation.y=t/900});
