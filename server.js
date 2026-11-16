@@ -139,9 +139,10 @@ function onMsg(c,m){
     if(!q.seat&&!q.act&&isFinite(+m.x)&&isFinite(+m.z)&&E.walkable(+m.x,+m.z,.3)){q.x=+m.x;q.z=+m.z;R.dirty.add(pid)}   // the request carries where the player stands right now
     if(m.a==='stand'){if(q.seat){q.seat=null;q.gi=-1;q.gk='';q.tg='';R.dirty.add(pid)}return}
     if(m.a==='sit'){const b=E.MAP.benches[m.b];if(!b)return;const same=q.seat&&q.seat.b===m.b;
-      if(!same&&!near(q,b,2.2))return fail('離長椅太遠了');
+      if(!same&&!near(q,b,2.9))return fail('離長椅太遠了');
       const taken=s=>Object.keys(R.pos).some(id=>id!==pid&&R.pos[id].seat&&R.pos[id].seat.b===m.b&&R.pos[id].seat.s===s);
-      const st=same?q.seat.s:[0,1].find(s=>!taken(s));if(st===undefined)return fail('這張長椅坐滿了');
+      const free=b.seats.map((_,i)=>i).filter(i=>!taken(i)).sort((a,c)=>Math.hypot(q.x-b.seats[a][0],q.z-b.seats[a][1])-Math.hypot(q.x-b.seats[c][0],q.z-b.seats[c][1]));
+      const st=same?q.seat.s:free[0];if(st===undefined)return fail('這張長椅坐滿了');
       q.seat={b:m.b,s:st,at:same?q.seat.at:now,arm:now};q.x=b.seats[st][0];q.z=b.seats[st][1];q.r=b.r;q.gi=7;q.gt='';q.gk=gk;q.tg=gt;q.done=false;q.act=null;R.dirty.add(pid);
       wsSend(c.sock,{t:'seat',x:q.x,z:q.z,r:q.r});return}
     if(q.seat)return fail('請先站起來');if(q.act)return;
@@ -151,7 +152,8 @@ function onMsg(c,m){
       if(!(Number.isInteger(k)&&k>=1&&k<=n))return;start(m.a,m.a==='book'?8:9,{n:k});return}
     if(m.a==='tea'){if(roomOfP(q)!=='tea'||!near(q,E.MAP.tea,2.2))return fail('離茶桌太遠了');start('tea',10,{ok:inTea(R,gt)});return}
     if(m.a==='light'){const room=roomOfP(q),sw=E.MAP.switches[room];if(!sw||!near(q,sw,2.2))return fail('離電燈開關太遠了');
-      if(R.env.dark[room]){delete R.env.dark[room];wsSend(c.sock,{t:'gdone',fired:false,k:'',m:'',a:'light'});return}
+      const mine=gk&&g.task[pid]&&g.task[pid][gk]===11;
+      if(R.env.dark[room]&&!mine){delete R.env.dark[room];wsSend(c.sock,{t:'gdone',fired:false,k:'',m:'',a:'light'});return}
       R.env.dark[room]=now+12000;start('light',11,{room,ok:alone(R,room,pid,gt)});return}
     return}
 }
@@ -172,12 +174,16 @@ setInterval(()=>{
         if(q.act){const A=q.act;                                        // a timed action at an object
           if(!live||Math.hypot(q.x-A.x,q.z-A.z)>.4){q.act=null;q.gi=-1;R.dirty.add(pid);continue}
           if(now-A.t0<HOLD)continue;
-          q.act=null;q.gi=-1;R.dirty.add(pid);let ok=false;
-          if(A.a==='book'){if(R.env.books[A.n])delete R.env.books[A.n];else{R.env.books[A.n]=1;ok=g.seat[A.gt]===A.n}}
-          else if(A.a==='letter'){R.env.lockers[A.n]=1;ok=g.seat[A.gt]===A.n}
-          else if(A.a==='tea')ok=A.ok&&inTea(R,A.gt);
-          else if(A.a==='light')ok=A.ok&&!!R.env.dark[A.room]&&alone(R,A.room,pid,A.gt);
-          if(fire(R,pid,ok?A.gk:'',A.gt,A.gi,A.a))changed=true;continue}
+          q.act=null;q.gi=-1;R.dirty.add(pid);let ok=false,why='';
+          if(A.a==='book'){if(R.env.books[A.n])delete R.env.books[A.n];else R.env.books[A.n]=1;      // turning the target's book counts whichever way it was
+            ok=g.seat[A.gt]===A.n;why='這本不是對象座號的書'}
+          else if(A.a==='letter'){R.env.lockers[A.n]=1;ok=g.seat[A.gt]===A.n;why='這不是對象座號的置物櫃'}
+          else if(A.a==='tea'){ok=A.ok&&inTea(R,A.gt);why='對象沒有一直站在茶桌旁'}
+          else if(A.a==='light'){ok=A.ok&&!!R.env.dark[A.room]&&alone(R,A.room,pid,A.gt);why=R.env.dark[A.room]?'房間裡不是只有你和對象兩個人':'燈被打開了'}
+          if(ok){if(fire(R,pid,A.gk,A.gt,A.gi,A.a))changed=true}
+          else{const mine=A.gk&&g.task[pid]&&g.task[pid][A.gk]===A.gi,c=R.cl.get(pid);                 // tell only the actor why a prepared skill did not go off
+            if(c)wsSend(c.sock,{t:'gdone',fired:false,k:'',m:mine?'沒有發動：'+why:'',a:A.a})}
+          continue}
         if(q.gi<0)continue;                                             // a gesture next to the target
         if(!live){q.gi=-1;q.gt='';q.gk='';R.dirty.add(pid);continue}
         if(q.done)continue;const t=R.pos[q.gt];

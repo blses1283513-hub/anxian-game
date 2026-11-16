@@ -107,8 +107,8 @@ window.Stage3D=(()=>{
     const lamp2=new T.PointLight(0xffe2b0,1.0,24);lamp2.position.set(6,3.2,0);root.add(lamp2);
     // 交誼廳: benches
     M.benches.forEach(b=>{const gb=new T.Group();gb.position.set(b.x,0,b.z);gb.rotation.y=b.r;
-      const seat=new T.Mesh(new T.BoxGeometry(2.0,.12,.55),mat(0x7a5a3a));seat.position.y=.46;const back=new T.Mesh(new T.BoxGeometry(2.0,.6,.1),mat(0x5e442b));back.position.set(0,.8,-.3);
-      const l1=new T.Mesh(new T.BoxGeometry(.1,.46,.5),mat(0x2b2018));l1.position.set(-.9,.23,0);const l2=l1.clone();l2.position.x=.9;gb.add(seat,back,l1,l2);root.add(gb)});
+      const seat=new T.Mesh(new T.BoxGeometry(4.0,.12,.55),mat(0x7a5a3a));seat.position.y=.46;const back=new T.Mesh(new T.BoxGeometry(4.0,.6,.1),mat(0x5e442b));back.position.set(0,.8,-.3);
+      const l1=new T.Mesh(new T.BoxGeometry(.1,.46,.5),mat(0x2b2018));l1.position.set(-1.9,.23,0);const l2=l1.clone();l2.position.x=1.9;gb.add(seat,back,l1,l2);root.add(gb)});
     const rug=new T.Mesh(new T.CircleGeometry(2.4,32),mat(0x3a2a35));rug.rotation.x=-Math.PI/2;rug.position.set(6,.01,0);root.add(rug);
     // 圖書室: one book per seat number
     const sh=M.shelf;box(4.6,2.3,.4,mat(0x3d2c1e),sh.x,1.15,-11.72);box(4.6,.06,.36,mat(0x2a1e14),sh.x,1.22,-11.6);box(4.6,.06,.36,mat(0x2a1e14),sh.x,.47,-11.6);
@@ -184,7 +184,7 @@ window.Stage3D=(()=>{
   function distTo(id){const p=peers[id];return p&&!p.hidden?Math.hypot(p.x-me3.x,p.z-me3.z):99}
   function nearObjs(){const o=[],d=q=>Math.hypot(me3.x-q.x,me3.z-q.z),room=A.roomOf(me3.x,me3.z);
     if(seated)return[{t:'seated'}];
-    M.benches.forEach((b,i)=>{if(room==='lounge'&&d(b)<=1.9)o.push({t:'bench',b:i})});
+    M.benches.forEach((b,i)=>{if(room==='lounge'&&d(b)<=2.6)o.push({t:'bench',b:i})});
     if(room==='library'&&d(M.shelf)<=2.0)o.push({t:'shelf'});
     if(room==='locker'&&d(M.lockers)<=2.0)o.push({t:'lockers'});
     if(room==='tea'&&d(M.tea)<=2.0)o.push({t:'tea'});
