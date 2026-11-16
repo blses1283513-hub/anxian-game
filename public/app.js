@@ -31,22 +31,44 @@ function connect(){
     else if(m.t==='pos'){if(Stage3D)Stage3D.peers(m.p,m.init)}
     else if(m.t==='voice'){Voice.setList(m.list,m.ice);if(Voice.st.on&&mode==='net'&&!m.list.includes(myId))send({t:'voice',on:true})}
     else if(m.t==='rtc'){Voice.signal(m.from,m.d)}
-    else if(m.t==='gdone'){if(Stage3D)Stage3D.stop();if(m.fired)toast('動作完成，「'+SKN[m.k]+'」已發動');else if(m.m)toast(m.m)}
+    else if(m.t==='gdone'){if(Stage3D)Stage3D.done();if(m.fired){ui.armed=null;toast('動作完成，「'+SKN[m.k]+'」已發動');render()}else if(m.m)toast(m.m);paintCtx()}
+    else if(m.t==='seat'){if(Stage3D)Stage3D.seat(m.x,m.z,m.r);paintCtx()}
+    else if(m.t==='act'){if(Stage3D)Stage3D.progress(m.a,m.ms)}
+    else if(m.t==='env'){if(Stage3D)Stage3D.env(m);paintCtx()}
     else if(m.t==='err'){toast(m.m);if(m.fatal){wantRoom=null;ls.del('ax_room');if(mode==='net'){S=null;mode=null}render()}}
     else if(m.t==='gone'){toast(m.m);Voice.disable();wantRoom=null;S=null;mode=null;me=null;ls.del('ax_room');render()}};
 }
 setInterval(()=>send({t:'ping'}),25000);
 setInterval(()=>{if(mode==='net')fetch('/healthz',{cache:'no-store'}).catch(()=>{})},240000); // keeps free hosts from idling the server mid-game
-if(Stage3D){Stage3D.onPos=p=>send(Object.assign({t:'pos'},p))}
+if(Stage3D){Stage3D.onPos=p=>send(Object.assign({t:'pos'},p));Stage3D.onEnv=o=>{send(Object.assign({t:'env'},o));paintCtx()};Stage3D.onNear=o=>{nearObjs=o||[];paintCtx()}}
+/* ---- using the building: benches, books, lockers, tea table, light switches ---- */
+let nearObjs=[];
+const sn=id=>(S&&S.g&&S.g.seat&&S.g.seat[id]?S.g.seat[id]+'號 ':'')+nm(S,id);
+function armedTask(){const a=ui.armed;return a&&S&&S.g?vTask(S,me,a.k):null}
+function ctxHtml(){
+  if(!S||!S.g||S.game!=='virus'||S.phase!=='play'||isBrief()||mode!=='net'||S.g.alive[me]===false)return'';
+  const n=S.players.length,arm=ui.armed,at=armedTask(),want=arm?S.g.seat[arm.t]:0;let h='';
+  for(const o of nearObjs){
+    if(o.t==='seated')h+=`<div class="cx"><span>你坐在長椅上${at&&at[1]===7?'，等 '+esc(nm(S,arm.t))+' 也坐下滿 3 秒':''}</span><button class="btn sm" data-a="stand">站起來</button></div>`;
+    else if(o.t==='bench')h+=`<div class="cx"><span>長椅</span><button class="btn sm pri" data-a="sit" data-v="${o.b}">坐下</button></div>`;
+    else if(o.t==='shelf'||o.t==='lockers'){const bk=o.t==='shelf',w=at&&at[1]===(bk?8:9)?want:0;
+      h+=`<div class="cx col"><span>${bk?'書架：把幾號的書倒過來？已經倒放的再選一次會轉回來':'置物櫃：把信投進幾號？'}</span><div class="nums">${Array.from({length:n},(_,i)=>`<button class="btn sm ${w===i+1?'pri':''}" data-a="${bk?'book':'letter'}" data-v="${i+1}">${i+1}</button>`).join('')}</div></div>`}
+    else if(o.t==='tea')h+=`<div class="cx"><span>茶桌</span><button class="btn sm pri" data-a="tea">倒茶</button></div>`;
+    else if(o.t==='switch')h+=`<div class="cx"><span>電燈開關</span><button class="btn sm pri" data-a="light">${o.dark?'開燈':'關燈'}</button></div>`;
+  }
+  return h}
+function paintCtx(){if(Stage3D)Stage3D.setCtx(ctxHtml())}
+function envSend(a,gi,x){const arm=ui.armed,t=armedTask(),m=Stage3D?Stage3D.debug().me:{};send(Object.assign({t:'env',a,x:m.x,z:m.z},x||{},arm&&t&&t[1]===gi?{gk:arm.k,gt:arm.t}:{}))}
 /* ---- voice ---- */
 const vPlay=()=>S&&mode==='net'&&S.phase==='play'&&S.g;
 function canSpeak(){return!(vPlay()&&S.game==='virus'&&S.g.alive[me]===false)}
 function vPolicy(pid){ // -1: no connection allowed, otherwise the volume (0..1) this player is heard at
   if(!S||mode!=='net'||!S.players.some(p=>p.id===pid)||!S.players.some(p=>p.id===me))return -1;
   if(vPlay()&&S.game==='chase'){const g=S.g,ch=id=>g.roles[id]==='thief'?'th':'t'+g.team[id];return ch(pid)===ch(me)?1:-1}
-  if(vPlay()&&S.game==='virus'){if(S.g.alive[pid]===false)return 0;if(!Stage3D||!Stage3D.inRoom())return 1;const d=Stage3D.dist(pid);return d<=3?1:d>=8.5?0:Math.pow((8.5-d)/5.5,1.5)}
+  if(vPlay()&&S.game==='virus'){if(S.g.alive[pid]===false)return 0;if(!Stage3D||!Stage3D.inRoom())return 1;const r=Stage3D.roomOf(pid);if(!r||r!==Stage3D.room())return 0;   // only people in the same room
+    const d=Stage3D.dist(pid);return d<=3?1:d>=8.5?0:Math.pow((8.5-d)/5.5,1.5)}
   return 1}
-function vScope(){return vPlay()?(S.game==='virus'?'靠近才聽得到，走遠就聽不見。':'只有同隊聽得到（小偷只聽得到小偷）。'):'現在所有人都聽得到。'}
+function vScope(){return vPlay()?(S.game==='virus'?'只聽得到同一間的人，離得越遠越小聲。':'只有同隊聽得到（小偷只聽得到小偷）。'):'現在所有人都聽得到。'}
 function paintVoice(){
   const el=document.getElementById('vbar');if(!el)return;const v=Voice.st;let h;
   if(!Voice.supported())h='<span class="sub">語音通話需要 https 網址和支援的瀏覽器，這裡只能用文字交談。</span>';
@@ -61,7 +83,7 @@ setInterval(()=>{if(!S||mode!=='net')return;paintVoice();
 const isBrief=()=>!!(S&&S.phase==='play'&&S.g&&S.g.briefEnd>0);
 const TGT='任何一名其他存活玩家';
 const BR={
-  T:{skills:[['infect','投放病毒','全隊共用一次，誰先用掉就沒了',TGT,'對方被感染。每日結束時病毒傳給下一個號碼的存活玩家，感染到期的人死亡。'],
+  T:{skills:[['infect','投放病毒','全隊共用一次，誰先用掉就沒了',TGT,'對方被感染。每日結束時病毒傳給下一個感染序號的存活玩家，感染到期的人死亡。'],
       ['shoot','開槍','你個人一次',TGT,'對方立刻出局，身分公開。'],
       ['antidote','解毒劑','你個人一次','任何一名存活玩家，包含自己','治好對方的感染。對沒被感染的人使用會浪費掉。用在自己身上不需要做動作。']],
     win:'至少一名恐怖分子存活，其餘玩家除了抗體保有者以外全部死亡。',score:['恐怖分子獲勝：每名恐怖分子 4 枚','沒有獲勝：0 枚']},
@@ -85,12 +107,12 @@ function briefBody(){
   const g=S.g,v=S.game==='virus',role=g.roles[me];let h='';
   if(v){const B=BR[role],g3=S.opts.verify==='3d'&&mode==='net';if(!B)return'';
     h+=`<h4>技能與目標</h4>`+(B.skills.length?B.skills.map(([k,n,lim,tg,ef])=>{const t=g3?vTask(S,me,k):null;
-      return`<div class="sk"><b>${n}</b>（${lim}）<ul><li>目標：${tg}</li><li>效果：${ef}</li>${t?`<li>施放條件：對目標「${t[0]}」，持續 3 秒</li>`:''}</ul></div>`}).join('')
-      :`<p>你沒有主動技能。${g3?'你可以對任何人做 12 種動作來試探或誤導別人，這些動作不會發動任何技能。':''}</p>`);
-    if(g.antibody===me)h+=`<div class="sk"><b>抗體</b><ul><li>你會被感染，也會把病毒傳給下一個號碼，但一日後自行痊癒，不會病死。</li><li>研究員要找到你才能製藥。恐怖分子獲勝時不需要你死亡。</li></ul></div>`;
-    if(B.skills.length)h+=`<h4>施放操作</h4>`+(g3?`<ol><li>在場景裡走到目標旁邊，大約兩步以內</li><li>按下技能按鈕，選擇對象</li><li>你的角色會做出指定動作，保持 3 秒不要移動</li><li>系統自動判定，達成就發動；中途移動或對方走遠要重來，技能不算用掉</li></ol><p>別人只看得到你的動作，不會收到任何通知。</p>`
+      return`<div class="sk"><b>${n}</b>（${lim}）<ul><li>目標：${tg}</li><li>效果：${ef}</li>${t?`<li>施放條件：${t[0]}</li>`:''}</ul></div>`}).join('')
+      :`<p>你沒有主動技能。${g3?'你可以對任何人做動作，也可以使用長椅、書架、置物櫃、茶桌和電燈開關來試探或誤導別人，這些都不會發動任何技能。':''}</p>`);
+    if(g.antibody===me)h+=`<div class="sk"><b>抗體</b><ul><li>你會被感染，也會把病毒傳給下一個感染序號，但一日後自行痊癒，不會病死。</li><li>研究員要找到你才能製藥。恐怖分子獲勝時不需要你死亡。</li></ul></div>`;
+    if(B.skills.length)h+=`<h4>施放操作</h4>`+(g3?`<ol><li>按下技能按鈕，選擇對象</li><li>條件是「走到對方旁邊」的動作：先走到他旁邊約兩步內再按，你的角色會做出動作，保持 3 秒不要移動</li><li>條件是使用建築物的動作：按下後技能進入準備狀態，再去指定的地方完成動作（坐下、選號碼、倒茶或關燈）</li><li>系統自動判定，達成就發動；沒達成技能不算用掉，可以重來</li></ol><p>別人只看得到你做了什麼動作，不會收到任何通知。倒放的書和置物櫃上的信號旗會留到當日結束。</p>`
       :`<ol><li>按下技能按鈕</li><li>選擇對象並確定，立刻發動</li></ol>`);
-    h+=`<h4>你的號碼</h4><p>${g.num[me]} 號。病毒依號碼順序傳播，號碼只有你自己知道。</p>`;
+    h+=`<h4>你的號碼</h4><ul><li>座號 ${g.seat[me]} 號：公開，顯示在你的角色頭上。書本和置物櫃用座號對應玩家。</li><li>感染序號 ${g.num[me]} 號：只有你自己知道。病毒依感染序號的順序傳播。</li></ul>`;
     h+=`<h4>獲勝條件</h4><p>${B.win}</p><h4>積分計算</h4><ul>${B.score.map(x=>`<li>${x}</li>`).join('')}</ul>`;
   }else{const B=BR[role];if(!B)return'';
     h+=`<h4>行動與目標</h4>`+B.acts.map(([n,lim,tg,ef])=>`<div class="sk"><b>${n}</b>（${lim}）<ul><li>目標：${tg}</li><li>效果：${ef}</li></ul></div>`).join('');
@@ -129,7 +151,7 @@ setInterval(()=>{const e=document.getElementById('shuf');if(!e||!S||!S.g)return;
 let nPub=null;const cues={};
 function spoken(t){
   let m=t.match(/^(.+) 死亡（(槍擊|病毒發作)），身分是「(.+)」$/);
-  if(m)return`${m[1]}${m[2]==='槍擊'?'遭到槍擊':'病毒發作'}，出局。身分是${m[3]}。`;
+  if(m){const pl=S&&S.g&&S.g.seat?S.players.find(p=>p.name===m[1]):null;return`${pl?S.g.seat[pl.id]+' 號，':''}${m[1]}，${m[2]==='槍擊'?'遭到槍擊':'病毒發作'}，出局。身分是${m[3]}。`}
   return t.replace(/(\d+)\/(\d+)/g,'$1，目標 $2').replace(/（/g,'，').replace(/）/g,'').replace(/[「」]/g,'').replace(/：/g,'，')}
 function dayLine(t){ // a new day restates the public numbers
   const m=t.match(/^第 (\d+) 日開始$/);if(!m||!S.g||S.game!=='virus')return'';const g=S.g,n=S.players.filter(p=>g.alive[p.id]!==false).length;
@@ -197,14 +219,14 @@ const inGame=()=>S&&S.players.some(p=>p.id===me);
 function rulesHtml(game){
   const o=S?S.opts:{deathDelay:2,rounds:5,lootGoal:6,maxRounds:15};
   if(game==='virus')return`<details><summary>感染戰規則</summary><ul>
-    <li>每人拿到一個角色和一個只有自己知道的號碼。全程沒有投票，死亡只會來自子彈或病毒。</li>
-    <li>共 ${o.rounds} 日。房主按「提早結束本日」時結算：病毒先傳給下一個號碼的存活玩家（最大號接回最小號，跳過死者），再讓感染滿 ${o.deathDelay} 日的人死亡。</li>
-    <li>每日結束公布感染人數、死亡人數（含槍擊）、解毒劑進度。死者公開姓名與角色，不公開號碼和抗體。</li>
+    <li>每人拿到一個角色、一個公開的座號（顯示在角色頭上）和一個只有自己知道的感染序號。全程沒有投票，死亡只會來自子彈或病毒。</li>
+    <li>共 ${o.rounds} 日。房主按「提早結束本日」時結算：病毒先傳給下一個感染序號的存活玩家（最大號接回最小號，跳過死者），再讓感染滿 ${o.deathDelay} 日的人死亡。</li>
+    <li>每日結束公布感染人數、死亡人數（含槍擊）、解毒劑進度。死者公開姓名與角色，不公開感染序號和抗體。</li>
     <li>抗體保有者是其中一位市民：會被感染也會傳染，一日後自行痊癒，不會病死。</li>
     <li>獎勵（代幣）：恐怖分子勝各 4；市民方勝各 1、存活再 +1，研究員因解毒劑獲勝再 +1；搜查官在恐怖分子全滅時依達成日得 4/4/3/2/1；狂熱分子依死亡日得 3/2/2/1/0。</li>
-    <li>連線對戰時，每個人在 3D 房間裡操控自己的角色：左下搖桿移動，拖曳畫面轉視角。別人的位置和動作是即時的。</li>
-    <li>指定動作：每個技能開局會隨機配到一個只有你知道的動作（共 12 種：挽手臂、握手、擊掌、碰拳、搭肩、比槍、遞東西、碰杯、鞠躬、猜拳、拍背、勾小指）。走到目標旁邊、對他做這個動作滿 3 秒，系統自動判定，技能就發動；中途移動或距離拉開就不算。不需要任何人同意。</li>
-    <li>所有人都能對任何人做這 12 種動作，但只有符合自己指定動作的那一次會發動技能。系統不會通知任何人誰做了什麼，只有剛好看到的人才知道；柱子和櫃子會擋住視線。</li>
+    <li>連線對戰時，每個人在 3D 建築裡操控自己的角色：左下搖桿移動，拖曳畫面轉視角，右上角有小地圖。建築有兩個廳（圓桌廳、交誼廳）和六個房間（圖書室、置物間、茶水間、音樂室、儲藏室、醫務室）。你只看得到同一間的人，兩個廳之間互相看得到。</li>
+    <li>指定動作：每個技能開局會隨機配到一個只有你知道的動作，共 12 種。七種要走到對方旁邊做 3 秒：挽手臂、搭肩、比槍、遞東西、鞠躬、猜拳、拍背。五種要利用建築：和對方同坐交誼廳的長椅、到圖書室把對方座號的書倒過來、到置物間把信投進對方座號的置物櫃、對方在茶桌旁時為他倒茶、房間裡只有你和對方時關燈。系統自動判定，不需要任何人同意。</li>
+    <li>所有人都能做這些動作，但只有符合自己指定動作的那一次會發動技能。系統不會通知任何人誰做了什麼，只有剛好在同一間看到的人才知道。倒放的書和置物櫃的信號旗會留到當日結束，任何人走進去都看得到；關燈的房間裡看不到名字和動作標示。</li>
     <li>開局沒有人知道別人的身分，同陣營也一樣。病毒全隊只有一份，誰先用掉就沒了。大廳可以改成同陣營互相知道。</li>
     <li>每日時間到會自動結算，房主也可以提早結束。</li>
     <li>開局先隨機抽身分，接著有 60 秒的身分確認時間，畫面會列出你的技能、目標、施放條件、操作方式、獲勝條件和積分計算。時間到自動開始第 1 日，房主也可以提早開始。</li>
@@ -311,20 +333,23 @@ function stageSlot(){return`<div id="stage-slot">${Stage3D?'':S.game==='chase'?'
 function pickHtml(){
   const p=ui.pick,vg=S.game==='virus',g3=vg&&S.opts.verify==='3d'&&mode==='net';
   if(vg){p.targets=p.targets.filter(id=>S.g.alive[id]!==false);if(ui.t&&!p.targets.includes(ui.t))ui.t=null}
-  const task=g3?vTask(S,me,p.k):null,need=task&&ui.t&&ui.t!==me;
-  const lbl=!ui.t?'先選一個人':need?`對 ${esc(nm(S,ui.t))}「${GN[task[1]]}」3 秒`:`確定對 ${esc(nm(S,ui.t))} 使用`;
+  const task=g3?vTask(S,me,p.k):null,need=task&&ui.t&&ui.t!==me,envT=task&&task[1]>=7;
+  const lbl=!ui.t?'先選一個人':need?(envT?`準備對 ${esc(nm(S,ui.t))} 使用（${GN[task[1]]}）`:`對 ${esc(nm(S,ui.t))}「${GN[task[1]]}」3 秒`):`確定對 ${esc(nm(S,ui.t))} 使用`;
   return`<section class="panel"><h3>${esc(p.label)}：選擇對象</h3>
-    <div class="plist">${p.targets.map(id=>`<button class="btn sm ${ui.t===id?'on':''}" data-a="target" data-v="${esc(id)}">${esc(nm(S,id))}${id===me?'（自己）':''}</button>`).join('')}</div>
-    ${task?`<p class="note">這個技能的指定動作是「${task[0]}」。先走到對方旁邊（約兩步內），按下按鈕後保持 3 秒不要移動，系統會自動判定。也可以直接在場景裡點人來選對象。${ui.t===me?'用在自己身上不需要動作。':''}</p>`:''}
+    <div class="plist">${p.targets.map(id=>`<button class="btn sm ${ui.t===id?'on':''}" data-a="target" data-v="${esc(id)}">${esc(vg?sn(id):nm(S,id))}${id===me?'（自己）':''}</button>`).join('')}</div>
+    ${task?`<p class="note">這個技能的條件：${task[0]}。${envT?`按下按鈕後技能進入準備狀態，接著去完成這個動作，系統會自動判定。${ui.t&&ui.t!==me?'對方的座號是 '+S.g.seat[ui.t]+' 號。':''}`:'先走到對方旁邊（約兩步內），按下按鈕後保持 3 秒不要移動。也可以直接在場景裡點人來選對象。'}${ui.t===me?'用在自己身上不需要動作。':''}</p>`:''}
     <div class="row"><button class="btn pri grow" data-a="confirm" ${ui.t?'':'disabled'}>${lbl}</button><button class="btn" data-a="cancel">取消</button></div></section>`;
 }
+function armHtml(A){const a=ui.armed;if(!a)return'';const t=armedTask();
+  if(!t||!A.some(x=>x[0]===a.k)||S.g.alive[a.t]===false){ui.armed=null;return''}
+  return`<div class="note armed">已準備「${SKN[a.k]}」→ ${esc(sn(a.t))}。現在去完成：${t[0]}。<button class="btn sm" data-a="disarm">取消準備</button></div>`}
 function fakeHtml(){
   const g=S.g,others=S.players.filter(p=>p.id!==me&&g.alive[p.id]!==false);
   if(ui.ft&&!others.some(p=>p.id===ui.ft))ui.ft=null;
   return`<details class="fake" ${ui.fakeOpen?'open':''}><summary data-a="faketoggle">對人做動作（所有人都能做，不會發動技能）</summary>
-    <p class="sub">任何人都可以對任何人做這 12 種動作，拿來試探或誤導別人。先選對象，走到他旁邊再選動作。</p>
-    <div class="row">${others.map(p=>`<button class="btn sm ${ui.ft===p.id?'on':''}" data-a="ftarget" data-v="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
-    <div class="ggrid">${GN.map((n,i)=>`<button class="btn sm" data-a="fake" data-v="${i}" ${ui.ft?'':'disabled'}>${n}</button>`).join('')}</div></details>`;
+    <p class="sub">任何人都可以對任何人做這 7 種動作，拿來試探或誤導別人。先選對象，走到他旁邊再選動作。長椅、書架、置物櫃、茶桌和電燈開關也是所有人都能用，走近就會出現按鈕。</p>
+    <div class="row">${others.map(p=>`<button class="btn sm ${ui.ft===p.id?'on':''}" data-a="ftarget" data-v="${esc(p.id)}">${esc(sn(p.id))}</button>`).join('')}</div>
+    <div class="ggrid">${GN.slice(0,7).map((n,i)=>`<button class="btn sm" data-a="fake" data-v="${i}" ${ui.ft?'':'disabled'}>${n}</button>`).join('')}</div></details>`;
 }
 function hostCtl(inner){return isHost()?`<section class="panel"><h3>房主控制</h3>${inner}</section>`:''}
 
@@ -341,10 +366,10 @@ function virusView(){
     const tasks=g3?(VSK[role]||[]).map(k=>[k,vTask(S,me,k)]).filter(x=>x[1]):[];
     h+=ui.hide?`<div class="hidden-card">身分卡已蓋住 <button class="btn sm" data-a="hide">翻開</button></div>`:
     `<section class="dossier"><span class="stamp ${R.c}">${R.f}</span><span class="lbl">你的身分</span><div class="role">${R.n}</div>
-      <div class="num">號碼 ${g.num[me]}${g.antibody===me?'　・　你是抗體保有者':''}${g.alive[me]?'':'　・　已死亡'}</div>
+      <div class="num">座號 ${g.seat[me]}（公開）・感染序號 ${g.num[me]}（秘密）${g.antibody===me?'　・　你是抗體保有者':''}${g.alive[me]?'':'　・　已死亡'}</div>
       ${mates.length?`<div>同伴：<b>${mates.map(id=>esc(nm(S,id))).join('、')}</b></div>`:(role==='T'||role==='R')&&!S.opts.knowMates?'<div>你不知道誰是同伴，要自己找出來。</div>':''}
       <ul>${R.d.map(d=>`<li>${d}</li>`).join('')}${g.antibody===me?'<li>抗體：你會被感染也會傳染，但一日後自行痊癒</li>':''}</ul>
-      ${tasks.length?`<div class="lbl">指定動作（只有你知道）</div><ul>${tasks.map(([k,t])=>`<li>${SKN[k]}：對目標「${t[0]}」3 秒</li>`).join('')}</ul>`:''}
+      ${tasks.length?`<div class="lbl">指定動作（只有你知道）</div><ul>${tasks.map(([k,t])=>`<li>${SKN[k]}：${t[0]}</li>`).join('')}</ul>`:''}
       <details class="fullbrief"><summary>完整身分說明</summary>${briefBody()}</details>
       <div><button class="btn sm" data-a="hide">蓋住</button></div></section>`;
     if(g.alive[me]){
@@ -354,7 +379,7 @@ function virusView(){
       if(role==='J'&&!ru.check)A.push(['check','查驗身分（本日一次）',others]);
       if(role==='R'&&!ru.research)A.push(['research','製藥：指定受試者',others]);
       if(ui.pick)h+=pickHtml();
-      else h+=`<section class="panel"><h3>你的技能</h3>${g.round<1?'<p class="sub">第 1 日開始後才能使用。</p>':A.length?`<div class="stack">${A.map(([k,l])=>{const t=g3?vTask(S,me,k):null;return`<button class="btn" data-a="pick" data-v="${k}">${l}${t?`<span class="tk">條件：${GN[t[1]]} 3 秒</span>`:''}</button>`}).join('')}</div>`:'<p class="sub">目前沒有可用的技能。</p>'}</section>`;
+      else h+=`<section class="panel"><h3>你的技能</h3>${g.round<1?'<p class="sub">第 1 日開始後才能使用。</p>':A.length?`<div class="stack">${A.map(([k,l])=>{const t=g3?vTask(S,me,k):null;return`<button class="btn" data-a="pick" data-v="${k}">${l}${t?`<span class="tk">條件：${GN[t[1]]}</span>`:''}</button>`}).join('')}</div>`:'<p class="sub">目前沒有可用的技能。</p>'}${armHtml(A)}</section>`;
       ui._acts=A;
       if(g3)h+=fakeHtml();
     }else h+=`<p class="note">你已死亡。你還可以轉動視角觀看，但不能移動、發言或使用技能。</p>`;
@@ -363,7 +388,7 @@ function virusView(){
   h+=hostCtl(g.round===0?`<button class="btn pri wide" data-a="next">開始第 1 日</button>`:
     ui.confirmNext?`<p class="sub">結算後病毒會擴散，感染到期的人會死亡。</p><div class="row"><button class="btn pri grow" data-a="next">確定結束第 ${g.round} 日</button><button class="btn" data-a="cancel">取消</button></div>`
     :`<p class="sub">時間到會自動結算，也可以提早結束。</p><button class="btn wide" data-a="asknext">提早結束第 ${g.round} 日並結算</button>`);
-  h+=`<section class="panel"><h3>玩家</h3><div class="plist">${all.map(id=>`<div class="pl ${g.alive[id]?'':'dead'} ${id===me?'me':''}" data-sp="${esc(id)}"><span>${esc(nm(S,id))}</span><span class="tag">${g.alive[id]||!VR[g.roles[id]]?'':VR[g.roles[id]].n}</span></div>`).join('')}</div></section>`;
+  h+=`<section class="panel"><h3>玩家</h3><div class="plist">${all.map(id=>`<div class="pl ${g.alive[id]?'':'dead'} ${id===me?'me':''}" data-sp="${esc(id)}"><span>${esc(sn(id))}</span><span class="tag">${g.alive[id]||!VR[g.roles[id]]?'':VR[g.roles[id]].n}</span></div>`).join('')}</div></section>`;
   return h+logHtml()+rulesHtml('virus');
 }
 function mapSvg(){
@@ -433,7 +458,7 @@ function overView(){
   const g=S.g,R=S.result,v=S.game==='virus';
   const rows=S.players.map(({id,name})=>{
     const role=v?VR[g.roles[id]].n+(g.antibody===id?'・抗體':''):({thief:'小偷',cop:'警察',corrupt:'內鬼'}[g.roles[id]]+(g.roles[id]==='thief'?'':'・'+TEAMS[g.team[id]]));
-    const st=v?(g.alive[id]?'存活':'第 '+g.deathRound[id]+' 日死亡')+'・'+g.num[id]+' 號':(g.roles[id]==='thief'?(g.arrested[id]?'被捕':'在逃'):(g.accuse[id]?'指認 '+nm(S,g.accuse[id]):'未指認'));
+    const st=v?(g.alive[id]?'存活':'第 '+g.deathRound[id]+' 日死亡')+'・座號 '+g.seat[id]+'・感染序號 '+g.num[id]+' 號':(g.roles[id]==='thief'?(g.arrested[id]?'被捕':'在逃'):(g.accuse[id]?'指認 '+nm(S,g.accuse[id]):'未指認'));
     return`<tr><td>${esc(name)}${id===me?'（你）':''}</td><td>${role}</td><td>${esc(st)}</td><td class="n">+${R.rw[id]||0}</td></tr>`}).join('');
   return topBar()+`<section class="banner"><h2>${R.title}</h2><p class="sub">${esc(R.why)}</p></section>
     ${stageSlot()}
@@ -471,7 +496,7 @@ function render(){
   if(Stage3D)Stage3D.walk=mode==='net'&&!isBrief();
   if(slot&&Stage3D&&S&&S.g)Stage3D.attach(slot,S,me,ui,(kind,id)=>{if(kind==='virus'){if(id===me)return;if(ui.pick&&ui.pick.targets.includes(id))H.target(id);else if(mode==='net'&&S.opts.verify==='3d'&&S.g.alive[id]!==false&&S.g.alive[me]){ui.ft=id;ui.fakeOpen=true;render()}}else H.st(id)});
   const nmg=document.getElementById('msgs');if(nmg)nmg.scrollTop=stick?nmg.scrollHeight:otop;
-  paintVoice();
+  paintVoice();paintCtx();
   if(fid){const n=document.getElementById(fid);if(n&&n!==document.activeElement){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}}
   tick();
 }
@@ -510,6 +535,10 @@ const H={
   ftarget(v){ui.ft=v;ui.fakeOpen=true;render()},
   fake(v){if(!ui.ft||!Stage3D)return;const e=Stage3D.gesture(+v,ui.ft,'',nm(S,ui.ft));if(e)toast(e)},
   gstop(){if(Stage3D)Stage3D.stop()},
+  disarm(){ui.armed=null;render();paintCtx()},
+  sit(v){ui.bench=+v;envSend('sit',7,{b:+v})},
+  stand(){send({t:'env',a:'stand'});if(Stage3D)Stage3D.stand();paintCtx()},
+  book(v){envSend('book',8,{n:+v})},letter(v){envSend('letter',9,{n:+v})},tea(){envSend('tea',10)},light(){envSend('light',11)},
   narr(){Narr.toggle();render()},
   von(){Voice.enable()},vmic(){Voice.toggleMic()},voff(){Voice.disable()},
   gnew(){ui.gpanel='new';ui.gsel=[];render()},
@@ -524,7 +553,9 @@ const H={
   target(v){ui.t=v;render()},
   confirm(){if(!ui.pick||!ui.t)return;const a={k:ui.pick.k,t:ui.t};
     if(S.game==='virus'&&mode==='net'&&S.opts.verify==='3d'&&a.t!==me){const task=vTask(S,me,a.k);if(!Stage3D||!task){toast('這台裝置無法顯示 3D 場景');return}
-      const e=Stage3D.gesture(task[1],a.t,a.k,nm(S,a.t));if(e){toast(e);return}ui.pick=null;ui.t=null;render();const s=document.getElementById('stage-slot');if(s)s.scrollIntoView({block:'nearest',behavior:'smooth'});return}
+      if(task[1]>=7){ui.armed={k:a.k,t:a.t};ui.pick=null;ui.t=null;toast('已準備「'+SKN[a.k]+'」，去完成指定動作');render();
+        if(task[1]===7&&Stage3D.debug().seated&&ui.bench!=null)envSend('sit',7,{b:ui.bench});paintCtx();return}
+      ui.armed=null;const e=Stage3D.gesture(task[1],a.t,a.k,nm(S,a.t));if(e){toast(e);return}ui.pick=null;ui.t=null;render();const s=document.getElementById('stage-slot');if(s)s.scrollIntoView({block:'nearest',behavior:'smooth'});return}
     if(mode==='net'){ui.pick=null;ui.t=null}go(a);if(mode==='net')render()},
   st(v){ui.sel=+v;render()},
   moveto(v){ui.sel=null;go({k:'move',to:+v})},
@@ -550,5 +581,5 @@ document.addEventListener('pointerdown',()=>{if(S)keepAwake()},{passive:true});
 document.addEventListener('gesturestart',e=>e.preventDefault());
 if(ui.join.length===4)wantRoom=null;
 render();connect();
-window.__ax={narr:Narr,voice:Voice,get S(){return S},get me(){return me},get mode(){return mode},get online(){return online},stage:Stage3D,myId,send};
+window.__ax={get ui(){return ui},narr:Narr,voice:Voice,get S(){return S},get me(){return me},get mode(){return mode},get online(){return online},stage:Stage3D,myId,send};
 })();

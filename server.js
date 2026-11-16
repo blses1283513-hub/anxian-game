@@ -5,7 +5,7 @@ const http=require('http'),fs=require('fs'),path=require('path'),crypto=require(
 const E=require('./public/engine.js');
 const PORT=+process.env.PORT||3000,PUB=path.join(__dirname,'public');
 const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png'};
-const RANGE=1.9,HOLD=3000,ROOM_R=9.2;
+const RANGE=1.9,HOLD=3000;
 const BRIEF=process.env.BRIEF_SECONDS!==undefined?+process.env.BRIEF_SECONDS:null; // BRIEF_SECONDS is for testing only
 const ROUND_MS=S=>process.env.ROUND_SECONDS?+process.env.ROUND_SECONDS*1000:S.opts.roundMin*60000; // ROUND_SECONDS is for testing only
 
@@ -67,11 +67,26 @@ function mayTalk(R,a,b){const S=R.S,inList=id=>S.players.some(p=>p.id===id);if(!
 /* ---- rooms ---- */
 const rooms=new Map();
 const clean=s=>String(s||'').replace(/[\u0000-\u001f]/g,'').trim().slice(0,12);
-function spawn(R){const ids=R.S.players.map(p=>p.id),n=ids.length;R.pos={};
-  ids.forEach((id,i)=>{const a=i/n*Math.PI*2;R.pos[id]={x:Math.sin(a)*3.7,z:Math.cos(a)*3.7,r:a+Math.PI,gi:-1,gt:'',gk:'',since:0,done:false}});R.dirty=new Set(ids)}
+function spawn(R){const ids=R.S.players.map(p=>p.id),n=ids.length,now=Date.now();R.pos={};
+  ids.forEach((id,i)=>{const p=E.spawnOf(i,n);R.pos[id]={x:p.x,z:p.z,r:p.r,gi:-1,gt:'',gk:'',tg:'',since:0,done:false,seat:null,act:null,seen:now}});
+  R.dirty=new Set(ids);R.env={books:{},lockers:{},dark:{}};R.day=0;for(const [,c] of R.cl){c.vroom=null;c.envS=''}}
 function pushState(R,toast){R.last=Date.now();const now=Date.now();
   for(const [pid,c] of R.cl)wsSend(c.sock,{t:'state',S:E.redact(R.S,pid),now,toast:toast||''})}
-function posList(R,ids){const p={};for(const id of ids){const q=R.pos[id];if(q)p[id]=[+q.x.toFixed(2),+q.z.toFixed(2),+q.r.toFixed(2),q.gi,q.gt]}return p}
+const roomOfP=q=>E.roomOf(q.x,q.z);
+const near=(q,o,d)=>Math.hypot(q.x-o.x,q.z-o.z)<=d;
+const viewRoom=(R,pid)=>R.pos[pid]?roomOfP(R.pos[pid]):'round';
+/* A player only receives the positions of people they could see: the same room, or hall to hall. 0 = out of sight. */
+function posFor(R,pid,ids){const all=R.S.phase==='over',vr=viewRoom(R,pid),p={};
+  for(const id of ids){const q=R.pos[id];if(!q)continue;
+    p[id]=(all||id===pid||E.sees(vr,roomOfP(q)))?[+q.x.toFixed(2),+q.z.toFixed(2),+q.r.toFixed(2),q.gi,q.gt]:0}
+  return p}
+function sendAllPos(R,c,init){wsSend(c.sock,{t:'pos',p:posFor(R,c.pid,Object.keys(R.pos)),init:init?1:0})}
+function inTea(R,id){const t=R.pos[id];return!!(t&&R.S.g.alive[id]&&roomOfP(t)==='tea'&&near(t,E.MAP.tea,2.6))}
+function alone(R,room,a,b){const ids=Object.keys(R.pos).filter(id=>R.S.g.alive[id]&&roomOfP(R.pos[id])===room);return ids.length===2&&ids.includes(a)&&ids.includes(b)}
+/* an action is complete: the skill fires only if this action is the actor's secret condition for it */
+function fire(R,pid,gk,gt,gi,a){const S=R.S;let fired=false,msg='';
+  if(gk){const task=S.g.task[pid]&&S.g.task[pid][gk];if(task===gi){const e=E.vUse(S,pid,gk,gt);if(e)msg='沒有發動：'+e;else fired=true}}
+  const c=R.cl.get(pid);if(c)wsSend(c.sock,{t:'gdone',fired,k:gk,m:msg,a:a||''});return fired}
 function bind(c,R,pid){const old=R.cl.get(pid);if(old&&old!==c){wsSend(old.sock,{t:'gone',m:'你在另一個裝置或分頁重新加入了'});old.room=null;voiceOff(R,pid)}
   c.room=R;c.pid=pid;R.cl.set(pid,c)}
 function onMsg(c,m){
@@ -92,7 +107,7 @@ function onMsg(c,m){
       const e=E.act(S,null,{k:'add',id:pid,name:clean(m.name)||'玩家'},true);
       if(e){wsSend(c.sock,{t:'err',m:'這個房間已經滿了（16 人）',fatal:1});return}}
     bind(c,R,pid);pushState(R);wsSend(c.sock,{t:'voice',list:[...R.voice].filter(id=>R.cl.has(id)),ice:ICE});
-    if(S.phase!=='lobby'&&S.game==='virus')wsSend(c.sock,{t:'pos',p:posList(R,Object.keys(R.pos)),init:1});return}
+    c.vroom=null;c.envS='';if(S.phase!=='lobby'&&S.game==='virus'&&R.env){c.vroom=viewRoom(R,pid);c.vphase=S.phase;sendAllPos(R,c,1)}return}
   const R=c.room;if(!R||!c.pid)return;const S=R.S,pid=c.pid;
   if(m.t==='voice'){if(!S.players.some(p=>p.id===pid))return;if(m.on)R.voice.add(pid);else R.voice.delete(pid);voiceList(R);return}
   if(m.t==='rtc'){const to=String(m.to||''),k=R.cl.get(to);if(k&&R.voice.has(pid)&&R.voice.has(to)&&mayTalk(R,pid,to))wsSend(k.sock,{t:'rtc',from:pid,d:m.d});return}
@@ -103,15 +118,42 @@ function onMsg(c,m){
     const was=S.phase,e=E.act(S,pid,a,host);
     if(e){wsSend(c.sock,{t:'err',m:e});return}
     if(a.k==='kick'){const k=R.cl.get(a.t);if(k){wsSend(k.sock,{t:'gone',m:'你被房主移出房間'});R.cl.delete(a.t);k.room=null}voiceOff(R,a.t)}
-    if(was==='lobby'&&S.phase==='play'&&S.game==='virus'){spawn(R);pushState(R);for(const [,k] of R.cl)wsSend(k.sock,{t:'pos',p:posList(R,Object.keys(R.pos)),init:1});return}
+    if(was==='lobby'&&S.phase==='play'&&S.game==='virus'){spawn(R);pushState(R);for(const [id,k] of R.cl){k.vroom=viewRoom(R,id);k.vphase=S.phase;sendAllPos(R,k,1)}return}
     pushState(R);return}
+  if(process.env.TEST_HOOKS&&m.t==='dbg'&&S.g&&S.g.task&&S.g.task[pid]){S.g.task[pid][m.k]=m.gi;pushState(R);return}   // tests only: choose my own secret condition
   if(m.t==='pos'){
     const q=R.pos[pid];if(!q||S.phase!=='play'||S.game!=='virus'||!S.g.alive[pid])return;
-    let x=+m.x,z=+m.z;if(!isFinite(x)||!isFinite(z))return;const d=Math.hypot(x,z);if(d>ROOM_R){x*=ROOM_R/d;z*=ROOM_R/d}
-    q.x=x;q.z=z;q.r=isFinite(+m.r)?+m.r:q.r;
-    const gi=Number.isInteger(m.gi)&&m.gi>=0&&m.gi<E.GN.length?m.gi:-1,gt=gi>=0?String(m.gt||''):'',gk=gi>=0&&E.SKN[m.gk]?m.gk:'';
-    if(gi!==q.gi||gt!==q.gt||gk!==q.gk){q.gi=gi;q.gt=gt;q.gk=gk;q.since=Date.now();q.done=false}
-    q.seen=Date.now();R.dirty.add(pid);R.last=Date.now();return}
+    const now=Date.now();q.seen=now;R.last=now;
+    const x=+m.x,z=+m.z;if(!isFinite(x)||!isFinite(z)||S.g.briefEnd)return;          // nobody moves during the identity briefing
+    if(q.seat){if(now-q.seat.arm<800||Math.hypot(x-q.x,z-q.z)<.3)return;q.seat=null;q.gi=-1;q.gk='';q.tg=''}   // walking away from the bench = standing up (positions sent just before sitting down are ignored)
+    if(E.walkable(x,z,.3)){q.x=x;q.z=z}
+    q.r=isFinite(+m.r)?+m.r:q.r;R.dirty.add(pid);
+    if(q.act){if(Math.hypot(q.x-q.act.x,q.z-q.act.z)>.4){q.act=null;q.gi=-1;wsSend(c.sock,{t:'gdone',fired:false,k:'',m:'你移動了，動作中斷',a:'x'})}return}
+    const gi=Number.isInteger(m.gi)&&m.gi>=0&&m.gi<7?m.gi:-1,gt=gi>=0?String(m.gt||''):'',gk=gi>=0&&E.SKN[m.gk]?m.gk:'';
+    if(gi!==q.gi||gt!==q.gt||gk!==q.gk){q.gi=gi;q.gt=gt;q.gk=gk;q.since=now;q.done=false}
+    return}
+  if(m.t==='env'){                                                                   // using the building: benches, books, lockers, tea, lights
+    const q=R.pos[pid],g=S.g;if(!q||S.phase!=='play'||S.game!=='virus'||!g.alive[pid])return;
+    const fail=t=>wsSend(c.sock,{t:'err',m:t});if(g.briefEnd)return fail('身分確認時間還沒結束');
+    const now=Date.now(),gk=E.SKN[m.gk]?m.gk:'',gt=gk?String(m.gt||''):'',n=S.players.length;q.seen=now;
+    if(!q.seat&&!q.act&&isFinite(+m.x)&&isFinite(+m.z)&&E.walkable(+m.x,+m.z,.3)){q.x=+m.x;q.z=+m.z;R.dirty.add(pid)}   // the request carries where the player stands right now
+    if(m.a==='stand'){if(q.seat){q.seat=null;q.gi=-1;q.gk='';q.tg='';R.dirty.add(pid)}return}
+    if(m.a==='sit'){const b=E.MAP.benches[m.b];if(!b)return;const same=q.seat&&q.seat.b===m.b;
+      if(!same&&!near(q,b,2.2))return fail('離長椅太遠了');
+      const taken=s=>Object.keys(R.pos).some(id=>id!==pid&&R.pos[id].seat&&R.pos[id].seat.b===m.b&&R.pos[id].seat.s===s);
+      const st=same?q.seat.s:[0,1].find(s=>!taken(s));if(st===undefined)return fail('這張長椅坐滿了');
+      q.seat={b:m.b,s:st,at:same?q.seat.at:now,arm:now};q.x=b.seats[st][0];q.z=b.seats[st][1];q.r=b.r;q.gi=7;q.gt='';q.gk=gk;q.tg=gt;q.done=false;q.act=null;R.dirty.add(pid);
+      wsSend(c.sock,{t:'seat',x:q.x,z:q.z,r:q.r});return}
+    if(q.seat)return fail('請先站起來');if(q.act)return;
+    const start=(a,gi,x)=>{q.act=Object.assign({a,gi,gk,gt,t0:now,x:q.x,z:q.z},x||{});q.gi=gi;q.gt='';q.gk='';R.dirty.add(pid);wsSend(c.sock,{t:'act',a,ms:HOLD})};
+    if(m.a==='book'||m.a==='letter'){const k=+m.n;
+      if(!near(q,m.a==='book'?E.MAP.shelf:E.MAP.lockers,2.2))return fail(m.a==='book'?'離書架太遠了':'離置物櫃太遠了');
+      if(!(Number.isInteger(k)&&k>=1&&k<=n))return;start(m.a,m.a==='book'?8:9,{n:k});return}
+    if(m.a==='tea'){if(roomOfP(q)!=='tea'||!near(q,E.MAP.tea,2.2))return fail('離茶桌太遠了');start('tea',10,{ok:inTea(R,gt)});return}
+    if(m.a==='light'){const room=roomOfP(q),sw=E.MAP.switches[room];if(!sw||!near(q,sw,2.2))return fail('離電燈開關太遠了');
+      if(R.env.dark[room]){delete R.env.dark[room];wsSend(c.sock,{t:'gdone',fired:false,k:'',m:'',a:'light'});return}
+      R.env.dark[room]=now+12000;start('light',11,{room,ok:alone(R,room,pid,gt)});return}
+    return}
 }
 setInterval(()=>{
   const now=Date.now();
@@ -119,23 +161,44 @@ setInterval(()=>{
     const S=R.S;
     if(now-R.last>3*3600e3){rooms.delete(code);continue}
     if(S.phase==='play'&&S.g&&S.g.briefEnd&&now>=S.g.briefEnd){E.briefDone(S);pushState(R)}
-    if(S.phase==='play'&&S.game==='virus'){
-      let changed=false;
-      for(const pid in R.pos){const q=R.pos[pid];if(q.gi<0)continue;
-        if(!R.cl.has(pid)||now-(q.seen||0)>2500){q.gi=-1;q.gt='';q.gk='';R.dirty.add(pid);continue}
+    if(S.phase==='play'&&S.game==='virus'&&R.env){
+      let changed=false;const g=S.g;
+      for(const pid in R.pos){const q=R.pos[pid],live=!!g.alive[pid]&&R.cl.has(pid)&&now-(q.seen||0)<=2500;
+        if(q.seat){                                                     // sitting on a bench
+          if(!g.alive[pid]){q.seat=null;q.gi=-1;R.dirty.add(pid);continue}
+          if(q.gk&&!q.done){const t=R.pos[q.tg];
+            if(t&&t.seat&&t.seat.b===q.seat.b&&g.alive[q.tg]&&now-Math.max(q.seat.arm,t.seat.at)>=HOLD){q.done=true;if(fire(R,pid,q.gk,q.tg,7,'sit'))changed=true}}
+          continue}
+        if(q.act){const A=q.act;                                        // a timed action at an object
+          if(!live||Math.hypot(q.x-A.x,q.z-A.z)>.4){q.act=null;q.gi=-1;R.dirty.add(pid);continue}
+          if(now-A.t0<HOLD)continue;
+          q.act=null;q.gi=-1;R.dirty.add(pid);let ok=false;
+          if(A.a==='book'){if(R.env.books[A.n])delete R.env.books[A.n];else{R.env.books[A.n]=1;ok=g.seat[A.gt]===A.n}}
+          else if(A.a==='letter'){R.env.lockers[A.n]=1;ok=g.seat[A.gt]===A.n}
+          else if(A.a==='tea')ok=A.ok&&inTea(R,A.gt);
+          else if(A.a==='light')ok=A.ok&&!!R.env.dark[A.room]&&alone(R,A.room,pid,A.gt);
+          if(fire(R,pid,ok?A.gk:'',A.gt,A.gi,A.a))changed=true;continue}
+        if(q.gi<0)continue;                                             // a gesture next to the target
+        if(!live){q.gi=-1;q.gt='';q.gk='';R.dirty.add(pid);continue}
         if(q.done)continue;const t=R.pos[q.gt];
-        if(!t||!S.g.alive[pid]||!S.g.alive[q.gt]||Math.hypot(q.x-t.x,q.z-t.z)>RANGE){q.since=now;continue}
+        if(!t||!g.alive[q.gt]||roomOfP(t)!==roomOfP(q)||Math.hypot(q.x-t.x,q.z-t.z)>RANGE){q.since=now;continue}
         if(now-q.since<HOLD)continue;
-        q.done=true;let msg='',fired=false;
-        if(q.gk){const task=S.g.task[pid]&&S.g.task[pid][q.gk];
-          if(task===q.gi){const e=E.vUse(S,pid,q.gk,q.gt);if(e)msg='沒有發動：'+e;else{fired=true;changed=true}}}
-        const c=R.cl.get(pid);if(c)wsSend(c.sock,{t:'gdone',fired,k:q.gk,m:msg});
+        q.done=true;if(fire(R,pid,q.gk,q.gt,q.gi,'g'))changed=true;
       }
       if(S.phase==='play'&&S.g.round>=1&&now>=S.g.roundStart+ROUND_MS(S)){const r=S.g.round;E.act(S,null,{k:'next'},true);pushState(R,`第 ${r} 日時間到，已自動結算`);changed=false}
       if(changed)pushState(R);
-      if(S.phase==='play')for(const id in R.pos)if(!S.g.alive[id]&&R.pos[id].gi>=0){R.pos[id].gi=-1;R.dirty.add(id)}
+      if(S.phase==='play'){for(const id in R.pos)if(!S.g.alive[id]&&R.pos[id].gi>=0){R.pos[id].gi=-1;R.pos[id].seat=null;R.pos[id].act=null;R.dirty.add(id)}
+        if(R.day!==S.g.round){R.day=S.g.round;R.env.books={};R.env.lockers={}}}                       // flipped books and letters last until the day ends
+      for(const r in R.env.dark)if(now>=R.env.dark[r])delete R.env.dark[r];
     }
-    if(R.dirty.size){const p=posList(R,R.dirty);R.dirty.clear();for(const [,c] of R.cl)wsSend(c.sock,{t:'pos',p})}
+    if(S.game==='virus'&&S.g&&R.env&&S.phase!=='lobby'){
+      for(const [pid,c] of R.cl){const vr=viewRoom(R,pid);
+        if(c.vroom!==vr||c.vphase!==S.phase){c.vroom=vr;c.vphase=S.phase;sendAllPos(R,c,0)}           // entered another room: what is visible changes
+        else if(R.dirty.size)wsSend(c.sock,{t:'pos',p:posFor(R,pid,R.dirty)});
+        const e=JSON.stringify({dark:Object.keys(R.env.dark),books:vr==='library'?Object.keys(R.env.books).map(Number):null,lockers:vr==='locker'?Object.keys(R.env.lockers).map(Number):null});
+        if(e!==c.envS){c.envS=e;wsSend(c.sock,Object.assign({t:'env'},JSON.parse(e)))}}
+    }
+    R.dirty.clear();
   }
 },125);
 server.listen(PORT,()=>console.log('暗線遊戲室 listening on port '+PORT));
