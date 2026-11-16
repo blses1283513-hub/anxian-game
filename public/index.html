@@ -146,7 +146,9 @@ summary{padding-block:10px;touch-action:manipulation}
 .mini svg{width:100%;height:100%}
 .mini rect{fill:#22323c;stroke:#3d5665;stroke-width:.25}
 .mini rect.on{fill:#6b4d16}
-.mini text{font-size:2.4px;fill:#b9c6c9;text-anchor:middle;font-family:var(--body)}
+.mini rect.co{fill:#18232b;stroke:none}
+.mini rect.co.on{fill:#4a3712}
+.mini text{font-size:3.2px;fill:#b9c6c9;text-anchor:middle;font-family:var(--body)}
 .mini circle{fill:#e8a33d;stroke:#0f1a22;stroke-width:.3}
 .gbar{right:112px}
 .ctx{position:absolute;left:136px;right:8px;bottom:28px;display:flex;flex-direction:column;gap:6px;line-height:1.4}
@@ -155,6 +157,18 @@ summary{padding-block:10px;touch-action:manipulation}
 .nums{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
 .nums .btn{min-height:32px;padding:2px 0}
 .note.armed{border-left-color:var(--threat);color:var(--bone);display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.lookrow{display:flex;gap:10px;align-items:flex-start}
+.lookbig{width:96px;height:128px;flex:none;background:var(--panel2);border:1px solid var(--line);border-radius:4px}
+.lookgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;flex:1;min-width:0}
+.lookbtn{padding:0;background:var(--panel2);border:1px solid var(--line);border-radius:4px;cursor:pointer;aspect-ratio:3/4;overflow:hidden;touch-action:manipulation}
+.lookbtn img{width:100%;height:100%;object-fit:cover;display:block}
+.lookbtn.on{border-color:var(--amber);box-shadow:inset 0 0 0 2px var(--amber)}
+.lookopts{margin-top:8px}
+.lk{min-width:4.5em}
+.swatch{width:30px;height:30px;border-radius:50%;border:2px solid var(--line);padding:0;cursor:pointer;touch-action:manipulation}
+.swatch.on{border-color:var(--bone);box-shadow:0 0 0 2px var(--amber)}
+.pth{width:22px;height:30px;vertical-align:middle;margin-right:6px;border-radius:2px;background:var(--panel2)}
+.pl .pn{display:flex;align-items:center;min-width:0}
 .hud{position:sticky;top:env(safe-area-inset-top,0px);z-index:15;background:var(--ink);border:1px solid var(--amber);border-radius:6px;padding:8px 12px;display:flex;flex-direction:column;gap:4px;box-shadow:0 6px 14px rgba(0,0,0,.45)}
 .hudrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .hudday{font-family:var(--display);font-weight:900;font-size:22px;line-height:1.1;color:var(--amber)}

@@ -95,7 +95,7 @@ function onMsg(c,m){
   if(m.t==='create'){
     const pid=clean(m.pid);if(pid.length<6)return;
     let code;do{code=Array.from({length:4},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ'[crypto.randomInt(24)]).join('')}while(rooms.has(code));
-    const S=E.newState(E.GAMES[m.game]?m.game:'virus',pid,code);if(BRIEF!==null)S.opts.briefSec=BRIEF;S.players.push({id:pid,name:clean(m.name)||'房主'});
+    const S=E.newState(E.GAMES[m.game]?m.game:'virus',pid,code);if(BRIEF!==null)S.opts.briefSec=BRIEF;S.players.push({id:pid,name:clean(m.name)||'房主',look:E.LOOKS[0][1].slice()});
     const R={S,cl:new Map(),pos:{},dirty:new Set(),last:Date.now(),keys:{},voice:new Set()};R.keys[pid]=String(m.key||'');rooms.set(code,R);bind(c,R,pid);pushState(R);return}
   if(m.t==='join'){
     const pid=clean(m.pid),R=rooms.get(String(m.code||'').toUpperCase());if(pid.length<6)return;

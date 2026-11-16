@@ -36,6 +36,7 @@ function act(S,pid,a,isHost){
     const G=S.groups.find(x=>x.id===a.g);if(!G||!G.m.includes(pid))return'你不在這個群組';
     if(a.k==='grpinv'){(a.m||[]).filter(valid).forEach(id=>{if(!G.m.includes(id))G.m.push(id)});return}
     G.m=G.m.filter(id=>id!==pid);if(G.m.length<2)S.groups=S.groups.filter(x=>x!==G);return}
+  if(a.k==='look'){if(S.phase!=='lobby')return'遊戲開始後不能換造型';const p=S.players.find(p=>p.id===pid);if(!p)return'你不在名單內';if(!okLook(a.look))return'造型資料不正確';p.look=a.look.slice();return}
   if(['opt','game','start','next','again','kick','add'].includes(a.k)){
     if(!isHost)return'只有房主可以操作';
     if(a.k==='next'){if(S.phase!=='play')return'遊戲未在進行';if(S.game==='chase'&&S.g.briefEnd)return briefDone(S);return S.game==='virus'?vNext(S):cAdvance(S,true)}
@@ -44,7 +45,7 @@ function act(S,pid,a,isHost){
     if(a.k==='opt'){const ok={deathDelay:[1,2],roundMin:[5,10,15,30],lootGoal:[5,6,7],verify:['3d','none'],knowMates:[0,1]}[a.o];if(!ok||!ok.includes(a.v))return'不支援的設定';S.opts[a.o]=a.v;return}
     if(a.k==='game'){if(!GAMES[a.v])return'沒有這款遊戲';S.game=a.v;return}
     if(a.k==='kick'){S.players=S.players.filter(p=>p.id!==a.t);S.kicked[a.t]=1;return}
-    if(a.k==='add'){if(S.players.length>=16)return'人數已滿';S.players.push({id:a.id,name:a.name});return}
+    if(a.k==='add'){if(S.players.length>=16)return'人數已滿';S.players.push({id:a.id,name:a.name,look:LOOKS[S.players.length%LOOKS.length][1].slice()});return}
     if(a.k==='start'){const G=GAMES[S.game],n=S.players.length;
       if(n<G.min||n>G.max)return`${G.name}需要 ${G.min}–${G.max} 人`;
       S.pub=[];S.priv={};S.chat=[];S.groups=[];S.result=null;S.phase='play';S.gid=Math.random().toString(36).slice(2,8);
@@ -69,32 +70,43 @@ const TASKS=[['走到對方旁邊，挽住他的手臂 3 秒',0],['走到對方�
   ['走到對方旁邊，向他鞠躬 3 秒',4],['走到對方旁邊，和他猜拳 3 秒',5],['走到對方旁邊，拍他的背 3 秒',6],
   ['和對方同時坐在交誼廳的同一張長椅上 3 秒',7],['到圖書室的書架前，把對方座號的那本書倒過來',8],['到置物間，把信投進對方座號的置物櫃',9],
   ['對方站在茶水間的茶桌旁時，在茶桌前為他倒茶 3 秒',10],['房間裡只有你和對方兩個人時關掉電燈，維持 3 秒',11]];
-/* ---------- the building: 2 halls + 6 rooms ---------- */
+/* ---------- the building: 2 halls, 6 rooms, 3 corridors (34 x 34) ---------- */
 const MAP={
-  rooms:[{id:'round',n:'圓桌廳',x0:-12,x1:0,z0:-6,z1:6,hall:1},{id:'lounge',n:'交誼廳',x0:0,x1:12,z0:-6,z1:6,hall:1},
-    {id:'library',n:'圖書室',x0:-12,x1:-6,z0:-12,z1:-6},{id:'locker',n:'置物間',x0:-6,x1:0,z0:-12,z1:-6},
-    {id:'tea',n:'茶水間',x0:0,x1:6,z0:-12,z1:-6},{id:'music',n:'音樂室',x0:6,x1:12,z0:-12,z1:-6},
-    {id:'store',n:'儲藏室',x0:-12,x1:-6,z0:6,z1:12},{id:'clinic',n:'醫務室',x0:6,x1:12,z0:6,z1:12}],
+  rooms:[{id:'round',n:'圓桌廳',x0:-17,x1:-2,z0:-6,z1:6,hall:1},{id:'lounge',n:'交誼廳',x0:2,x1:17,z0:-6,z1:6,hall:1},
+    {id:'library',n:'圖書室',x0:-17,x1:-6,z0:-17,z1:-9},{id:'locker',n:'置物間',x0:-6,x1:6,z0:-17,z1:-9},{id:'tea',n:'茶水間',x0:6,x1:17,z0:-17,z1:-9},
+    {id:'store',n:'儲藏室',x0:-17,x1:-6,z0:9,z1:17},{id:'music',n:'音樂室',x0:-6,x1:6,z0:9,z1:17},{id:'clinic',n:'醫務室',x0:6,x1:17,z0:9,z1:17},
+    {id:'corr',n:'走廊',x0:-17,x1:17,z0:-9,z1:-6,corr:1},{id:'corr',n:'走廊',x0:-17,x1:17,z0:6,z1:9,corr:1},{id:'corr',n:'走廊',x0:-2,x1:2,z0:-9,z1:9,corr:1}],
   // walls: ax 'x' runs along x at z=c from a to b; ax 'z' runs along z at x=c
-  walls:[{ax:'x',c:-12,a:-12,b:12},{ax:'x',c:-6,a:-12,b:12},{ax:'x',c:6,a:-12,b:12},{ax:'x',c:12,a:-12,b:-6},{ax:'x',c:12,a:6,b:12},
-    {ax:'z',c:-12,a:-12,b:12},{ax:'z',c:12,a:-12,b:12},{ax:'z',c:-6,a:-12,b:-6},{ax:'z',c:-6,a:6,b:12},{ax:'z',c:0,a:-12,b:6},{ax:'z',c:6,a:-12,b:-6},{ax:'z',c:6,a:6,b:12}],
-  // doors: a gap of width w centred at p on the wall (ax,c)
-  doors:[{ax:'x',c:-6,p:-9,w:1.8},{ax:'x',c:-6,p:-3,w:1.8},{ax:'x',c:-6,p:3,w:1.8},{ax:'x',c:-6,p:9,w:1.8},{ax:'x',c:6,p:-9,w:1.8},{ax:'x',c:6,p:9,w:1.8},{ax:'z',c:0,p:0,w:4}],
-  table:{x:-6,z:0,r:2.1},
-  obs:[{x:-6,z:0,r:2.1},{x:3,z:-9,r:.75},{x:10.6,z:-10.6,r:1.0},{x:10.6,z:10.4,r:1.1},{x:-10.7,z:10.7,r:1.0}],   // table, tea table, piano, bed, crates
-  benches:[{x:11.1,z:-2.6,r:-Math.PI/2,seats:[[11.1,-4.1],[11.1,-3.1],[11.1,-2.1],[11.1,-1.1]]},{x:11.1,z:2.6,r:-Math.PI/2,seats:[[11.1,1.1],[11.1,2.1],[11.1,3.1],[11.1,4.1]]},{x:4.5,z:5.1,r:Math.PI,seats:[[3,5.1],[4,5.1],[5,5.1],[6,5.1]]}],   // four seats each
-  shelf:{x:-9,z:-11.1},lockers:{x:-3,z:-11.1},tea:{x:3,z:-9},
-  switches:{library:{x:-7.6,z:-6.5},locker:{x:-1.6,z:-6.5},tea:{x:4.4,z:-6.5},music:{x:10.4,z:-6.5},store:{x:-7.6,z:6.5},clinic:{x:10.4,z:6.5}}
+  walls:[{ax:'x',c:-17,a:-17,b:17},{ax:'x',c:-9,a:-17,b:17},{ax:'x',c:-6,a:-17,b:-2},{ax:'x',c:-6,a:2,b:17},{ax:'x',c:6,a:-17,b:-2},{ax:'x',c:6,a:2,b:17},{ax:'x',c:9,a:-17,b:17},{ax:'x',c:17,a:-17,b:17},
+    {ax:'z',c:-17,a:-17,b:17},{ax:'z',c:17,a:-17,b:17},{ax:'z',c:-6,a:-17,b:-9},{ax:'z',c:6,a:-17,b:-9},{ax:'z',c:-6,a:9,b:17},{ax:'z',c:6,a:9,b:17},{ax:'z',c:-2,a:-6,b:6},{ax:'z',c:2,a:-6,b:6}],
+  // doors: a gap of width w centred at p on the wall (ax,c). Rooms open onto the corridors, so do the halls.
+  doors:[{ax:'x',c:-9,p:-11.5,w:1.8},{ax:'x',c:-9,p:0,w:1.8},{ax:'x',c:-9,p:11.5,w:1.8},{ax:'x',c:9,p:-11.5,w:1.8},{ax:'x',c:9,p:0,w:1.8},{ax:'x',c:9,p:11.5,w:1.8},
+    {ax:'x',c:-6,p:-9.5,w:2.4},{ax:'x',c:-6,p:9.5,w:2.4},{ax:'x',c:6,p:-9.5,w:2.4},{ax:'x',c:6,p:9.5,w:2.4},{ax:'z',c:-2,p:0,w:4},{ax:'z',c:2,p:0,w:4}],
+  size:17,table:{x:-9.5,z:0,r:2.1},lounge:{x:9.5,z:0},
+  deco:{piano:{x:4.6,z:15.6},bed:{x:15.6,z:15.4},crates:{x:-15.7,z:15.7}},
+  obs:[{x:-9.5,z:0,r:2.1},{x:11.5,z:-13,r:.75},{x:4.6,z:15.6,r:1.0},{x:15.6,z:15.4,r:1.1},{x:-15.7,z:15.7,r:1.0}],   // table, tea table, piano, bed, crates
+  benches:[{x:16.1,z:-3,r:-Math.PI/2,seats:[[16.1,-4.5],[16.1,-3.5],[16.1,-2.5],[16.1,-1.5]]},{x:16.1,z:3,r:-Math.PI/2,seats:[[16.1,1.5],[16.1,2.5],[16.1,3.5],[16.1,4.5]]},{x:9.5,z:5.1,r:Math.PI,seats:[[8,5.1],[9,5.1],[10,5.1],[11,5.1]]}],   // four seats each
+  shelf:{x:-11.5,z:-16.1},lockers:{x:0,z:-16.1},tea:{x:11.5,z:-13},
+  switches:{library:{x:-10.1,z:-9.5},locker:{x:1.4,z:-9.5},tea:{x:12.9,z:-9.5},store:{x:-10.1,z:9.5},music:{x:1.4,z:9.5},clinic:{x:12.9,z:9.5}}
 };
 const roomOf=(x,z)=>{for(const r of MAP.rooms)if(x>=r.x0&&x<=r.x1&&z>=r.z0&&z<=r.z1)return r.id;return''};
 const isHall=id=>id==='round'||id==='lounge';
-const sees=(a,b)=>!!a&&!!b&&(a===b||(isHall(a)&&isHall(b)));       // who can be seen from where: same room, or hall to hall
+const sees=(a,b)=>!!a&&a===b;                                        // you see the people who are in the same space as you
 function walkable(x,z,m){m=m==null?.45:m;
   for(const r of MAP.rooms)if(x>=r.x0+m&&x<=r.x1-m&&z>=r.z0+m&&z<=r.z1-m)return true;
   for(const d of MAP.doors){const along=d.ax==='x'?x:z,across=d.ax==='x'?z:x;if(Math.abs(along-d.p)<=d.w/2-.3&&Math.abs(across-d.c)<=m+.08)return true}
   return false}
 const blocked=(x,z)=>MAP.obs.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+.38);
 const spawnOf=(i,n)=>{const a=i/n*Math.PI*2;return{x:MAP.table.x+Math.sin(a)*3.6,z:MAP.table.z+Math.cos(a)*3.6,r:a+Math.PI}};
+/* ---------- avatars: 20 presets (10 male, 10 female); every part can be changed ---------- */
+// look = [sex 0/1, skin 0-4, hair style 0-7, hair colour 0-7, top colour 0-9, sleeve 0 short/1 long, bottom 0 trousers/1 shorts/2 skirt, bottom colour 0-7]
+const LOOK_MAX=[1,4,7,7,9,1,2,7];
+const LOOKS=[
+  ['短髮藍襯衫',[0,1,0,0,0,1,0,0]],['平頭運動風',[0,2,1,0,2,0,1,1]],['側分西裝',[0,0,2,1,7,1,0,0]],['捲髮紅帽T',[0,3,7,0,1,1,0,2]],['金髮夏日',[0,1,0,3,4,0,1,3]],
+  ['灰髮紳士',[0,0,2,5,8,1,0,4]],['黑膚街頭',[0,4,1,0,5,0,0,0]],['棕髮綠毛衣',[0,2,0,2,3,1,0,2]],['染髮潮流',[0,1,7,6,9,0,1,0]],['長髮文青',[0,0,3,1,6,1,0,5]],
+  ['長直髮洋裝',[1,0,3,0,1,0,2,2]],['馬尾運動',[1,1,4,2,2,0,1,1]],['鮑伯頭上班',[1,0,5,0,7,1,0,0]],['丸子頭粉色',[1,1,6,1,9,1,2,6]],['金色長髮',[1,0,3,3,4,0,1,3]],
+  ['捲髮黃上衣',[1,3,7,0,4,1,0,0]],['短髮帥氣',[1,2,0,0,5,1,0,0]],['黑膚馬尾',[1,4,4,0,0,0,2,4]],['紫髮個性',[1,1,5,7,6,0,1,0]],['棕髮毛衣裙',[1,2,6,2,3,1,2,5]]];
+const okLook=l=>Array.isArray(l)&&l.length===8&&l.every((v,i)=>Number.isInteger(v)&&v>=0&&v<=LOOK_MAX[i]);
 const VSK={T:['infect','shoot','antidote'],I:['shoot'],J:['check'],R:['research']};
 const SKN={infect:'投放病毒',shoot:'開槍',antidote:'解毒劑',check:'查驗身分',research:'製藥'};
 const vTask=(S,pid,k)=>{const t=S.g.task&&S.g.task[pid];return t&&t[k]!=null?TASKS[t[k]]:null};
@@ -102,7 +114,7 @@ function vComp(n){const T=n>=8?2:1,R=2,J=1,I=n>=7?1:0,F=n>=10?1:0;return{T,R,J,I
 function vDeal(S){
   const ids=S.players.map(p=>p.id),c=vComp(ids.length),roles=[];
   for(const k of 'TRJIFC')for(let i=0;i<c[k];i++)roles.push(k);
-  shuffle(roles);const nums=shuffle(ids.map((_,i)=>i+1)),seats=shuffle(ids.map((_,i)=>i+1));
+  shuffle(roles);const nums=shuffle(ids.map((_,i)=>i+1)),seats=ids.map((_,i)=>i+1);   // seat numbers follow the order people joined
   const g=S.g={round:0,roundStart:0,roles:{},num:{},alive:{},inf:{},used:{},ru:{},virusUsed:false,cure:0,cureRound:false,announced:false,deathRound:{},seat:{},stats:{inf:0,dead:0,cure:0}};
   ids.forEach((id,i)=>{g.roles[id]=roles[i];g.num[id]=nums[i];g.seat[id]=seats[i];g.alive[id]=true;g.used[id]={x:0};g.ru[id]={x:0}});
   const cs=ids.filter(id=>g.roles[id]==='C');g.antibody=cs[rnd(cs.length)];
@@ -305,6 +317,6 @@ function redact(S,pid){
   return V;
 }
 
-const AX={MAP,roomOf,isHall,sees,walkable,blocked,spawnOf,briefDone,GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,vUse,ST,ADJ,LINES,TEAMS,cActive,cStageName,redact,clone,rnd};
+const AX={LOOKS,LOOK_MAX,MAP,roomOf,isHall,sees,walkable,blocked,spawnOf,briefDone,GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,vUse,ST,ADJ,LINES,TEAMS,cActive,cStageName,redact,clone,rnd};
 if(typeof module!=='undefined'&&module.exports)module.exports=AX;else window.AX=AX;
 })();

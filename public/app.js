@@ -1,7 +1,7 @@
 /* 暗線遊戲室 — browser app: screens, input and the connection to the game server. */
 (()=>{
 "use strict";
-const {GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,ST,ADJ,LINES,TEAMS,cActive,cStageName,rnd}=window.AX;
+const {GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,ST,ADJ,LINES,TEAMS,cActive,cStageName,rnd,LOOKS}=window.AX;
 const Stage3D=window.Stage3D||null,Voice=window.Voice,Narr=window.Narrator,Snd=window.Sound;
 Narr.onSpeak=v=>Snd.duck(v);
 const app=document.getElementById('app'),toastEl=document.getElementById('toast');
@@ -193,8 +193,8 @@ function narrate(prev){
     const G=GAMES[S.game],n=S.players.length,pn=same&&prev.phase==='lobby'?prev.players.length:null;
     if(pn===null)say(same&&prev.phase==='over'?`回到大廳。這一局是${G.name}，目前 ${n} 人。`:`歡迎來到暗線遊戲室。這一局是${G.name}，目前 ${n} 人，需要 ${G.min} 到 ${G.max} 人。`);
     else if(n>pn){const nw=S.players[n-1].name;Snd.sfx('join');
-      say(n>=G.max?`${nw}加入。房間已滿，共 ${n} 人，房主可以開始遊戲。`:n>=G.min&&pn<G.min?`${nw}加入。目前 ${n} 人，已達開局人數。房主可以開始，也可以繼續等人。`:n<G.min?`${nw}加入。目前 ${n} 人，還差 ${G.min-n} 人才能開局。`:`${nw}加入，目前 ${n} 人。`)}
-    else if(n<pn)say(`有人離開，目前 ${n} 人。`+(n<G.min?`還差 ${G.min-n} 人才能開局。`:''));
+      say(n>=G.max?`${nw}加入。房間已滿，共 ${n} 人，房主可以開始遊戲。`:n>=G.min&&pn<G.min?`${nw}加入。目前 ${n} 人，已達開局人數。房主可以開始，也可以繼續等人。`:`${nw}加入，目前 ${n} 人。`)}
+    else if(n<pn)say(`有人離開，目前 ${n} 人。`);
     else if(prev.game!==S.game)say(`房主把遊戲換成${G.name}，需要 ${G.min} 到 ${G.max} 人。`);
     nPub=S.pubN||0;return}
   const N=S.pubN||0;
@@ -259,7 +259,8 @@ function rulesHtml(game){
     <li>每日結束公布感染人數、死亡人數（含槍擊）、解毒劑進度。死者公開姓名與角色，不公開感染序號和抗體。</li>
     <li>抗體保有者是其中一位市民：會被感染也會傳染，一日後自行痊癒，不會病死。</li>
     <li>獎勵（代幣）：恐怖分子勝各 4；市民方勝各 1、存活再 +1，研究員因解毒劑獲勝再 +1；搜查官在恐怖分子全滅時依達成日得 4/4/3/2/1；狂熱分子依死亡日得 3/2/2/1/0。</li>
-    <li>連線對戰時，每個人在 3D 建築裡操控自己的角色：左下搖桿移動，拖曳畫面轉視角，右上角有小地圖。建築有兩個廳（圓桌廳、交誼廳）和六個房間（圖書室、置物間、茶水間、音樂室、儲藏室、醫務室）。你只看得到同一間的人，兩個廳之間互相看得到。</li>
+    <li>連線對戰時，每個人在 3D 建築裡操控自己的角色：左下搖桿移動，拖曳畫面轉視角，右上角有小地圖。建築有兩個廳（圓桌廳、交誼廳）、六個房間（圖書室、置物間、茶水間、音樂室、儲藏室、醫務室）和連接它們的走廊。你只看得到、聽得到和你在同一個空間的人，走廊也算一個空間。</li>
+    <li>開局前可以在大廳選擇自己的造型（20 種，男女各 10），也可以微調髮型、髮色、膚色和服裝。座號照加入房間的順序編排。</li>
     <li>指定動作：每個技能開局會隨機配到一個只有你知道的動作，共 12 種。七種要走到對方旁邊做 3 秒：挽手臂、搭肩、比槍、遞東西、鞠躬、猜拳、拍背。五種要利用建築：和對方同坐交誼廳的長椅（每張 4 個座位）、到圖書室把對方座號的書倒過來、到置物間把信投進對方座號的置物櫃、對方在茶桌旁時為他倒茶、房間裡只有你和對方時關燈。系統自動判定，不需要任何人同意。</li>
     <li>所有人都能做這些動作，但只有符合自己指定動作的那一次會發動技能。系統不會通知任何人誰做了什麼，只有剛好在同一間看到的人才知道。倒放的書和置物櫃的信號旗會留到當日結束，任何人走進去都看得到；關燈的房間裡看不到名字和動作標示。</li>
     <li>開局沒有人知道別人的身分，同陣營也一樣。病毒全隊只有一份，誰先用掉就沒了。大廳可以改成同陣營互相知道。</li>
@@ -311,15 +312,31 @@ function homeView(){
 function topBar(){return hudHtml()+topBar0()+(mode==='net'&&inGame()?'<div id="vbar" class="vbar"></div>':'')}
 function topBar0(){return`<div class="row between"><div><h2>${GAMES[S.game].name}</h2><span class="sub">${mode==='local'?'單機輪流':'房號 '+esc(S.code)+((mode==='net'&&S.hostId===me)?'・你是房主':'')}</span></div>
   <div class="row">${mode==='local'&&S.phase!=='lobby'?`<button class="btn sm" data-a="cover">換人</button>`:''}<button class="btn sm" data-a="leave">離開</button></div></div>${ui.net?`<p class="note">${ui.net}</p>`:''}`}
+const thumbs={};
+function thumb(l,w,h){if(!Stage3D||!l)return'';const k=l.join('')+'_'+w;return k in thumbs?thumbs[k]:(thumbs[k]=Stage3D.thumb(l,w,h))}
+function lookHtml(){
+  const mine=S.players.find(p=>p.id===me);if(!mine||mode!=='net'||!Stage3D)return'';
+  const L=mine.look||LOOKS[0][1],key=L.join(''),P=Stage3D.palette,hex=c=>'#'+c.toString(16).padStart(6,'0');
+  const sw=(i,arr,label)=>`<div class="row"><span class="sub lk">${label}</span>${arr.map((c,v)=>`<button class="swatch ${L[i]===v?'on':''}" data-a="lookset" data-i="${i}" data-v="${v}" style="background:${hex(c)}" aria-label="${label} ${v+1}"></button>`).join('')}</div>`;
+  const ch=(i,names,label)=>`<div class="row"><span class="sub lk">${label}</span>${names.map((n,v)=>`<button class="btn sm ${L[i]===v?'on':''}" data-a="lookset" data-i="${i}" data-v="${v}">${n}</button>`).join('')}</div>`;
+  return`<section class="panel"><h3>你的造型</h3>
+    <div class="lookrow"><img class="lookbig" src="${thumb(L,132,176)}" alt="目前的造型">
+      <div class="lookgrid">${LOOKS.map(([n,l],i)=>`<button class="lookbtn ${l.join('')===key?'on':''}" data-a="lookpreset" data-v="${i}" title="${n}" aria-label="${n}"><img src="${thumb(l,60,80)}" alt=""></button>`).join('')}</div></div>
+    <p class="sub">前兩排是 10 種男性、後兩排是 10 種女性。選一個之後還可以微調。所有人都看得到你的造型。</p>
+    <details ${ui.lookOpen?'open':''}><summary data-a="looktoggle">微調造型</summary><div class="stack lookopts">
+      ${ch(0,['男','女'],'體型')}${sw(1,P.skin,'膚色')}${ch(2,['短髮','平頭','側分','長直髮','馬尾','鮑伯頭','丸子頭','捲髮'],'髮型')}${sw(3,P.hair,'髮色')}
+      ${sw(4,P.top,'上衣')}${ch(5,['短袖','長袖'],'袖長')}${ch(6,['長褲','短褲','裙子'],'下身')}${sw(7,P.bot,'下身顏色')}</div></details></section>`;
+}
 function lobbyView(){
   const G=GAMES[S.game],n=S.players.length,h=isHost(),ok=n>=G.min&&n<=G.max;
   const optBtn=(o,v,l)=>`<button class="btn sm ${S.opts[o]===v?'on':''}" data-a="opt" data-o="${o}" data-v="${v}">${l}</button>`;
   return topBar()+
   (mode!=='local'?`<section class="panel"><h3>房號</h3><div class="code">${esc(S.code)}</div><p class="sub">朋友用手機瀏覽器打開下面的網址就會直接進房，或打開首頁輸入這 4 碼。不需要任何帳號。</p><p class="share" id="share">${esc(location.origin+'/?room='+S.code)}</p><button class="btn sm" data-a="copy">複製邀請網址</button></section>`:'')+
   `<section class="panel"><div class="row between"><h3>玩家 ${n} 人</h3><span class="sub">需要 ${G.min}–${G.max} 人</span></div>
-    <div class="plist">${S.players.map(p=>`<div class="pl ${p.id===me?'me':''}" data-sp="${esc(p.id)}"><span>${esc(p.name)}</span>${h&&p.id!==S.hostId?`<button class="btn sm" data-a="kick" data-v="${esc(p.id)}" aria-label="移除 ${esc(p.name)}">移除</button>`:p.id===S.hostId?'<span class="tag">房主</span>':''}</div>`).join('')||'<p class="sub">還沒有人。</p>'}</div>
+    <div class="plist">${S.players.map((p,pi)=>`<div class="pl ${p.id===me?'me':''}" data-sp="${esc(p.id)}"><span class="pn">${thumb(p.look,36,48)?`<img class="pth" src="${thumb(p.look,36,48)}" alt="">`:''}${pi+1}號 ${esc(p.name)}</span>${h&&p.id!==S.hostId?`<button class="btn sm" data-a="kick" data-v="${esc(p.id)}" aria-label="移除 ${esc(p.name)}">移除</button>`:p.id===S.hostId?'<span class="tag">房主</span>':''}</div>`).join('')||'<p class="sub">還沒有人。</p>'}</div>
     ${mode==='local'?`<div class="row"><div class="grow"><input type="text" id="add" maxlength="12" value="${esc(ui.add)}" placeholder="輸入玩家名字" data-in="add"></div><button class="btn" data-a="addp">加入</button></div>`:''}
     ${mode==='net'&&!inGame()?`<p class="note">${S.kicked[me]?'你已被房主移出這個房間。':'正在加入…'}</p>`:''}</section>
+  ${lookHtml()}
   <section class="panel"><h3>這個人數的配置</h3><div class="row">${compHtml()}</div></section>
   ${h?`<section class="panel"><h3>設定</h3>
     <div class="row"><span class="sub">遊戲</span>${Object.entries(GAMES).map(([k,g])=>`<button class="btn sm ${S.game===k?'on':''}" data-a="setgame" data-v="${k}">${g.name}</button>`).join('')}</div>
@@ -576,6 +593,9 @@ const H={
   stand(){send({t:'env',a:'stand'});if(Stage3D)Stage3D.stand();paintCtx()},
   book(v){envSend('book',8,{n:+v})},letter(v){envSend('letter',9,{n:+v})},tea(){envSend('tea',10)},light(){envSend('light',11)},
   narr(){Narr.toggle();render()},
+  looktoggle(){ui.lookOpen=!ui.lookOpen},
+  lookpreset(v){go({k:'look',look:LOOKS[+v][1].slice()})},
+  lookset(v,el){const mine=S.players.find(p=>p.id===me);if(!mine)return;const L=(mine.look||LOOKS[0][1]).slice();L[+el.dataset.i]=+v;go({k:'look',look:L})},
   music(){Snd.setMusic(!Snd.musicOn());render()},sfxt(){Snd.setSfx(!Snd.sfxOn());render()},
   narrvoice(){const n=Narr.nextVoice();if(n)toast('旁白聲音：'+n);render()},
   narrhelp(){toast(/iPhone|iPad/.test(navigator.userAgent)?'這台裝置沒有中文語音：到「設定 > 輔助使用 > 朗讀內容 > 聲音 > 中文」下載，再重新整理網頁。':'這台裝置沒有中文語音：到手機「設定」搜尋「文字轉語音」，下載中文（台灣）語音，再重新整理網頁。')},
