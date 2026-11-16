@@ -232,6 +232,10 @@ function hudHtml(){
 function createRoom(){if(!send({t:'create',pid:myId,key:myKey,name:ui.nick.trim(),game:ui.game}))toast('還沒連上遊戲伺服器')}
 function joinRoom(code){code=(code||'').trim().toUpperCase();if(code.length!==4){toast('請輸入 4 碼房號');return}
   wantRoom=code;if(!send({t:'join',code,pid:myId,key:myKey,name:ui.nick.trim()}))toast('還沒連上遊戲伺服器')}
+// show my new look at once, so quick taps build on each other instead of on what the server last confirmed
+let lookPend=null;
+const myLook=()=>{const mine=S&&S.players.find(p=>p.id===me);return lookPend&&Date.now()-lookPend.t<2000?lookPend.L:(mine&&mine.look)||LOOKS[0][1]};
+function setLook(L){const mine=S&&S.players.find(p=>p.id===me);if(!mine||S.phase!=='lobby')return;lookPend={L,t:Date.now()};mine.look=L;go({k:'look',look:L});if(mode==='net')render()}
 function go(a,asHost){
   if(!S)return;
   if(mode==='net'){send({t:'act',a,host:!!asHost});if(a.k!=='say'&&!String(a.k).startsWith('grp')){ui.confirmNext=false}return}
@@ -316,7 +320,7 @@ const thumbs={};
 function thumb(l,w,h){if(!Stage3D||!l)return'';const k=l.join('')+'_'+w;return k in thumbs?thumbs[k]:(thumbs[k]=Stage3D.thumb(l,w,h))}
 function lookHtml(){
   const mine=S.players.find(p=>p.id===me);if(!mine||mode!=='net'||!Stage3D)return'';
-  const L=mine.look||LOOKS[0][1],key=L.join(''),P=Stage3D.palette,hex=c=>'#'+c.toString(16).padStart(6,'0');
+  const L=myLook(),key=L.join(''),P=Stage3D.palette,hex=c=>'#'+c.toString(16).padStart(6,'0');
   const sw=(i,arr,label)=>`<div class="row"><span class="sub lk">${label}</span>${arr.map((c,v)=>`<button class="swatch ${L[i]===v?'on':''}" data-a="lookset" data-i="${i}" data-v="${v}" style="background:${hex(c)}" aria-label="${label} ${v+1}"></button>`).join('')}</div>`;
   const ch=(i,names,label)=>`<div class="row"><span class="sub lk">${label}</span>${names.map((n,v)=>`<button class="btn sm ${L[i]===v?'on':''}" data-a="lookset" data-i="${i}" data-v="${v}">${n}</button>`).join('')}</div>`;
   return`<section class="panel"><h3>你的造型</h3>
@@ -594,8 +598,8 @@ const H={
   book(v){envSend('book',8,{n:+v})},letter(v){envSend('letter',9,{n:+v})},tea(){envSend('tea',10)},light(){envSend('light',11)},
   narr(){Narr.toggle();render()},
   looktoggle(){ui.lookOpen=!ui.lookOpen},
-  lookpreset(v){go({k:'look',look:LOOKS[+v][1].slice()})},
-  lookset(v,el){const mine=S.players.find(p=>p.id===me);if(!mine)return;const L=(mine.look||LOOKS[0][1]).slice();L[+el.dataset.i]=+v;go({k:'look',look:L})},
+  lookpreset(v){setLook(LOOKS[+v][1].slice())},
+  lookset(v,el){const L=myLook().slice();L[+el.dataset.i]=+v;setLook(L)},
   music(){Snd.setMusic(!Snd.musicOn());render()},sfxt(){Snd.setSfx(!Snd.sfxOn());render()},
   narrvoice(){const n=Narr.nextVoice();if(n)toast('旁白聲音：'+n);render()},
   narrhelp(){toast(/iPhone|iPad/.test(navigator.userAgent)?'這台裝置沒有中文語音：到「設定 > 輔助使用 > 朗讀內容 > 聲音 > 中文」下載，再重新整理網頁。':'這台裝置沒有中文語音：到手機「設定」搜尋「文字轉語音」，下載中文（台灣）語音，再重新整理網頁。')},
