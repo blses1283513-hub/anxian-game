@@ -2,7 +2,8 @@
 (()=>{
 "use strict";
 const {GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,ST,ADJ,LINES,TEAMS,cActive,cStageName,rnd}=window.AX;
-const Stage3D=window.Stage3D||null,Voice=window.Voice,Narr=window.Narrator;
+const Stage3D=window.Stage3D||null,Voice=window.Voice,Narr=window.Narrator,Snd=window.Sound;
+Narr.onSpeak=v=>Snd.duck(v);
 const app=document.getElementById('app'),toastEl=document.getElementById('toast');
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ls={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
@@ -78,7 +79,9 @@ function paintVoice(){
 Voice.send=o=>send(o);Voice.me=()=>myId;Voice.policy=vPolicy;Voice.canSpeak=canSpeak;Voice.onChange=()=>paintVoice();
 setInterval(()=>{if(!S||mode!=='net')return;paintVoice();
   document.querySelectorAll('[data-sp]').forEach(e=>e.classList.toggle('sp',Voice.speaking(e.dataset.sp)));
-  if(Stage3D)S.players.forEach(p=>Stage3D.speak(p.id,Voice.speaking(p.id)))},300);
+  if(Stage3D)S.players.forEach(p=>Stage3D.speak(p.id,Voice.speaking(p.id)));
+  const talk=S.players.some(p=>Voice.speaking(p.id));if(talk!==vDuck){vDuck=talk;Snd.duck(talk)}},300);
+let vDuck=false;
 /* ---- identity briefing ---- */
 const isBrief=()=>!!(S&&S.phase==='play'&&S.g&&S.g.briefEnd>0);
 const TGT='任何一名其他存活玩家';
@@ -121,13 +124,14 @@ function briefBody(){
   }
   return h;
 }
-let shufT=0;
+let shufT=0,shufKey='';
 function briefView(){
   const g=S.g,v=S.game==='virus',role=g.roles[me]&&g.roles[me]!=='?'?g.roles[me]:null,all=S.players.map(p=>p.id);
   const dealAt=g.briefEnd-S.opts.briefSec*1000,left=3000-(Date.now()+tOff-dealAt),still=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
   let h=topBar();
   if(!role)h+=`<p class="note">這一局你是觀眾。其他人正在確認身分。</p>`;
   else if(left>0&&!still){clearTimeout(shufT);shufT=setTimeout(render,left+40);
+    if(shufKey!==S.gid){shufKey=S.gid;setTimeout(()=>Snd.sfx('flip'),left)}
     h+=`<section class="dossier shuffle"><span class="lbl">身分抽籤中</span><div class="role" id="shuf">？</div><p>每個人的身分都是隨機分配的，只有自己看得到。</p></section>`}
   else{let top;
     if(v){const R=VR[role],mates=S.opts.knowMates&&(role==='T'||role==='R')?vTeam(S,role).filter(id=>id!==me):[];
@@ -157,12 +161,38 @@ function dayLine(t){ // a new day restates the public numbers
   const m=t.match(/^第 (\d+) 日開始$/);if(!m||!S.g||S.game!=='virus')return'';const g=S.g,n=S.players.filter(p=>g.alive[p.id]!==false).length;
   return +m[1]===1?`第 1 日開始。存活 ${n} 人。每日限時 ${S.opts.roundMin} 分鐘，共 ${S.opts.rounds} 日。技能現在可以使用。`
     :`第 ${m[1]} 日開始。目前存活 ${n} 人，感染 ${g.stats.inf} 人，解毒劑進度 ${g.stats.cure}，目標 2。限時 ${S.opts.roundMin} 分鐘。`}
+/* which sound effect and which tone of voice goes with a public line */
+function cue(t){
+  if(/死亡（槍擊）/.test(t))return{sfx:'gun',mood:'grave',delay:900};
+  if(/死亡（病毒發作）/.test(t))return{sfx:'cough',mood:'grave',delay:1300};
+  if(/^第 \d+ 日開始/.test(t))return{sfx:'bell',mood:'firm',delay:700};
+  if(/^第 \d+ 日結束/.test(t))return{sfx:'drum',mood:'calm',delay:600};
+  if(/^本局共/.test(t))return{sfx:'shuffle',mood:'mystery',delay:900};
+  if(/^身分已發下/.test(t))return{mood:'mystery'};
+  if(/解毒劑製造準備中/.test(t))return{sfx:'coin',mood:'bright',delay:400};
+  if(/解毒劑製造完成/.test(t))return{sfx:'success',mood:'bright',delay:600};
+  if(/^遊戲結束/.test(t)){const w=S.result&&S.result.winner;
+    if(w==='terror'||w==='thief')return{sfx:'laugh',mood:'dark',delay:3000};
+    if(w==='citizen')return{sfx:S.result.why==='解毒劑製成'?'success':'cheer',mood:'bright',delay:1500};
+    if(w==='cop')return{sfx:'siren',mood:'bright',delay:1800};
+    return{sfx:'wind',mood:'cold',delay:1500}}
+  if(/小偷取得第/.test(t))return{sfx:'coin',mood:'mystery',delay:300};
+  if(/被 .+ 逮捕/.test(t))return{sfx:'cuffs',mood:'firm',delay:500};
+  if(/身分確認結束|回合開始/.test(t))return{sfx:'bell',mood:'firm',delay:600};
+  return{mood:'neutral'}}
+function musicScene(){
+  if(!S||!mode)return'';if(S.phase==='lobby')return'lobby';
+  if(S.phase==='over'){const w=S.result&&S.result.winner;return w==='citizen'?(S.result.why==='解毒劑製成'?'win_cure':'win_citizen'):w==='cop'?'win_citizen':w==='terror'||w==='thief'?'win_terror':'none'}
+  if(!S.g)return'lobby';if(S.g.briefEnd)return'brief';
+  if(S.game==='chase')return S.g.stage==='thief'?'chase_thief':'chase_cop';
+  if(S.g.round<1)return'brief';
+  return S.g.roundStart+S.opts.roundMin*60000-(Date.now()+tOff)<=60000?'urgent':'day'}
 function narrate(prev){
-  if(!S)return;const say=Narr.say,same=prev&&prev.code===S.code;
+  if(!S)return;const say=(t,o)=>Narr.say(t,o),same=prev&&prev.code===S.code;
   if(S.phase==='lobby'){
     const G=GAMES[S.game],n=S.players.length,pn=same&&prev.phase==='lobby'?prev.players.length:null;
     if(pn===null)say(same&&prev.phase==='over'?`回到大廳。這一局是${G.name}，目前 ${n} 人。`:`歡迎來到暗線遊戲室。這一局是${G.name}，目前 ${n} 人，需要 ${G.min} 到 ${G.max} 人。`);
-    else if(n>pn){const nw=S.players[n-1].name;
+    else if(n>pn){const nw=S.players[n-1].name;Snd.sfx('join');
       say(n>=G.max?`${nw}加入。房間已滿，共 ${n} 人，房主可以開始遊戲。`:n>=G.min&&pn<G.min?`${nw}加入。目前 ${n} 人，已達開局人數。房主可以開始，也可以繼續等人。`:n<G.min?`${nw}加入。目前 ${n} 人，還差 ${G.min-n} 人才能開局。`:`${nw}加入，目前 ${n} 人。`)}
     else if(n<pn)say(`有人離開，目前 ${n} 人。`+(n<G.min?`還差 ${G.min-n} 人才能開局。`:''));
     else if(prev.game!==S.game)say(`房主把遊戲換成${G.name}，需要 ${G.min} 到 ${G.max} 人。`);
@@ -172,24 +202,25 @@ function narrate(prev){
     if(S.phase==='play'&&S.g)say(S.game==='virus'?(S.g.round>=1?`你已進入房間。現在是第 ${S.g.round} 日。`:'你已進入房間。現在是準備階段。'):`你已進入房間。現在是第 ${S.g.round} 回合，輪到${cStageName(S)}行動。`);
     else if(S.phase==='over')say('你已進入房間。這一局已經結束。');
     return}
-  if(N>nPub){const k=Math.min(N-nPub,S.pub.length,5);S.pub.slice(S.pub.length-k).forEach(l=>say(dayLine(l.t)||spoken(l.t)))}
+  if(N>nPub){const k=Math.min(N-nPub,S.pub.length,5);S.pub.slice(S.pub.length-k).forEach(l=>{const c=cue(l.t);if(c.sfx)Snd.sfx(c.sfx);say(dayLine(l.t)||spoken(l.t),c)})}
   nPub=N;
   if(S.game==='chase'&&S.phase==='play'){const g=S.g,pg=prev.phase==='play'&&prev.g?prev.g:null;
     if(pg&&g.round!==pg.round&&S.opts.maxRounds-g.round===2)say('注意，只剩最後三回合。');
-    if(!g.briefEnd&&(!pg||pg.briefEnd||g.stage!==pg.stage||g.round!==pg.round)){if(pg&&!pg.briefEnd&&g.stage!=='thief')say(`輪到${cStageName(S)}行動。`);if(me&&cActive(S).includes(me)&&!g.done[me])say('輪到你了。')}}
-  if(S.phase==='over'&&prev.phase==='play')say('所有人的身分已經公開，請看結算畫面。');
+    if(!g.briefEnd&&(!pg||pg.briefEnd||g.stage!==pg.stage||g.round!==pg.round)){if(pg&&!pg.briefEnd&&g.stage!=='thief')say(`輪到${cStageName(S)}行動。`);if(me&&cActive(S).includes(me)&&!g.done[me]){Snd.sfx('join');say('輪到你了。',{mood:'firm'})}}}
+  if(S.phase==='over'&&prev.phase==='play')say('所有人的身分已經公開，請看結算畫面。',{mood:S.result&&(S.result.winner==='terror'||S.result.winner==='thief')?'dark':'calm'});
 }
 function timeCues(now){
-  if(isBrief()){const rem=Math.round((S.g.briefEnd-now)/1000),k=(S.gid||'')+'|brief';if(rem<=10&&rem>5&&!cues[k]){cues[k]=1;Narr.say('十秒後遊戲開始。')}return}
+  if(isBrief()){const rem=Math.round((S.g.briefEnd-now)/1000),k=(S.gid||'')+'|brief';if(rem<=10&&rem>5&&!cues[k]){cues[k]=1;Snd.sfx('tick');Narr.say('十秒後遊戲開始。',{mood:'urgent'})}return}
   if(!S||S.phase!=='play'||S.game!=='virus'||S.g.round<1)return;
   const total=S.opts.roundMin*60,rem=Math.round((S.g.roundStart+total*1000-now)/1000);
   for(const [th,msg] of [[300,'剩下五分鐘'],[60,'剩下一分鐘'],[10,'最後十秒']]){const k=(S.gid||'')+'|'+S.g.round+'|'+th;
-    if(total>th&&rem<=th&&rem>th-4&&!cues[k]){cues[k]=1;Narr.say(`第 ${S.g.round} 日，${msg}。`)}}
+    if(total>th&&rem<=th&&rem>th-4&&!cues[k]){cues[k]=1;if(th===60)Snd.sfx('heartbeat');if(th===10)Snd.sfx('tick');Narr.say(`第 ${S.g.round} 日，${msg}。`,{mood:th===300?'firm':'urgent'})}}
 }
 function narrBtns(){const st=Narr.status();
   if(st==='none')return'<button class="btn sm" disabled>旁白僅字幕</button>';
   if(st==='nozh')return'<button class="btn sm" data-a="narrhelp">沒有中文語音</button>';
   return`<button class="btn sm ${Narr.isOn()?'on':''}" data-a="narr">${Narr.isOn()?'旁白：開':'旁白：關'}</button>${Narr.voiceCount()>1&&Narr.isOn()?'<button class="btn sm" data-a="narrvoice">換聲音</button>':''}`}
+function sndBtns(){return Snd.supported()?`<button class="btn sm ${Snd.musicOn()?'on':''}" data-a="music">${Snd.musicOn()?'音樂：開':'音樂：關'}</button><button class="btn sm ${Snd.sfxOn()?'on':''}" data-a="sfxt">${Snd.sfxOn()?'音效：開':'音效：關'}</button>`:''}
 function hudHtml(){
   const g=S.g,G=GAMES[S.game];let a,b;
   if(S.phase==='lobby'){a='等待玩家';b=`${S.players.length} 人・需要 ${G.min}–${G.max} 人`}
@@ -197,7 +228,7 @@ function hudHtml(){
   else if(g.briefEnd){a='身分確認';b=`剩餘 <span id="hudclock" data-end="${g.briefEnd}">–</span> 後開始`}
   else if(S.game==='virus'){a=g.round>=1?`第 ${g.round} 日`:'準備階段';b=g.round>=1?`剩餘 <span id="hudclock" data-end="${g.roundStart+S.opts.roundMin*60000}">–</span>`:'第 1 日開始後計時'}
   else{a=`第 ${g.round} 回合`;b=`輪到${cStageName(S)}・共 ${S.opts.maxRounds} 回合`}
-  return`<div class="hud" id="hud"><div class="hudrow"><span class="hudday">${a}</span><span class="hudtime">${b}</span>${narrBtns()}</div><div class="hudcap" id="hudcap" aria-live="polite">${esc(Narr.caption())}</div></div>`}
+  return`<div class="hud" id="hud"><div class="hudrow"><span class="hudday">${a}</span><span class="hudtime">${b}</span></div><div class="hudrow hudbtns">${narrBtns()}${sndBtns()}</div><div class="hudcap" id="hudcap" aria-live="polite">${esc(Narr.caption())}</div></div>`}
 function createRoom(){if(!send({t:'create',pid:myId,key:myKey,name:ui.nick.trim(),game:ui.game}))toast('還沒連上遊戲伺服器')}
 function joinRoom(code){code=(code||'').trim().toUpperCase();if(code.length!==4){toast('請輸入 4 碼房號');return}
   wantRoom=code;if(!send({t:'join',code,pid:myId,key:myKey,name:ui.nick.trim()}))toast('還沒連上遊戲伺服器')}
@@ -211,7 +242,7 @@ function go(a,asHost){
   if(S.phase==='play'&&S.game==='chase'&&!asHost&&a.k==='done')ui.cover=true;
   render();ls.set('ax_local',S);
 }
-function leave(){Voice.disable();nPub=null;Narr.clear();if(mode==='net')send({t:'leave'});wantRoom=null;S=null;mode=null;me=null;ui.cover=false;ui.pick=null;ls.del('ax_room');render()}
+function leave(){Voice.disable();nPub=null;Narr.clear();Snd.scene('');if(mode==='net')send({t:'leave'});wantRoom=null;S=null;mode=null;me=null;ui.cover=false;ui.pick=null;ls.del('ax_room');render()}
 function startLocal(resume){
   mode='local';me=null;wantRoom=null;
   S=resume&&ls.get('ax_local')||newState(ui.game,null,'');S.opts.verify='none';S.opts.briefSec=0;
@@ -234,6 +265,7 @@ function rulesHtml(game){
     <li>開局沒有人知道別人的身分，同陣營也一樣。病毒全隊只有一份，誰先用掉就沒了。大廳可以改成同陣營互相知道。</li>
     <li>每日時間到會自動結算，房主也可以提早結束。</li>
     <li>開局先隨機抽身分，接著有 60 秒的身分確認時間，畫面會列出你的技能、目標、施放條件、操作方式、獲勝條件和積分計算。時間到自動開始第 1 日，房主也可以提早開始。</li>
+    <li>配樂會依場景切換（大廳、身分確認、白天、最後一分鐘、各種結局），槍響、鐘聲、心跳等音效會配合事件播放。畫面上方可以分別關掉音樂和音效。</li>
     <li>旁白會在開局、每日開始與結束、有人出局、倒數和結局時播報，同時顯示字幕。畫面上方可以關掉旁白聲音。</li>
     <li>語音：按「開啟語音通話」後可以直接說話。聲音跟著角色的距離，站得近聽得清楚，走遠就聽不見；想私下談就走到角落，別人也可以靠過來偷聽。死者自動靜音。</li>
     <li>文字交談：公開討論室所有人可見；可以一對一密談，也可以拉任意幾個人開群組，不限陣營。說謊、冒充身分都允許。死者不能發言。</li>
@@ -500,7 +532,7 @@ function render(){
   if(Stage3D)Stage3D.walk=mode==='net'&&!isBrief();
   if(slot&&Stage3D&&S&&S.g)Stage3D.attach(slot,S,me,ui,(kind,id)=>{if(kind==='virus'){if(id===me)return;if(ui.pick&&ui.pick.targets.includes(id))H.target(id);else if(mode==='net'&&S.opts.verify==='3d'&&S.g.alive[id]!==false&&S.g.alive[me]){ui.ft=id;ui.fakeOpen=true;render()}}else H.st(id)});
   const nmg=document.getElementById('msgs');if(nmg)nmg.scrollTop=stick?nmg.scrollHeight:otop;
-  paintVoice();paintCtx();
+  paintVoice();paintCtx();Snd.scene(musicScene());
   if(fid){const n=document.getElementById(fid);if(n&&n!==document.activeElement){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}}
   tick();
 }
@@ -508,7 +540,7 @@ function tick(){
   const now=Date.now()+tOff;
   if(S&&mode==='local'&&S.phase==='play'&&S.game==='virus'&&S.g.round>=1&&now>=S.g.roundStart+S.opts.roundMin*60000){
     const r=S.g.round,prev=JSON.parse(JSON.stringify(S));act(S,null,{k:'next'},true);ui.confirmNext=false;toast(`第 ${r} 日時間到，已自動結算`);narrate(prev);render();ls.set('ax_local',S);return}
-  timeCues(now);
+  timeCues(now);if(S&&mode)Snd.scene(musicScene());
   const hc=document.getElementById('hudclock');if(hc){const s=Math.max(0,Math.round((+hc.dataset.end-now)/1000));hc.textContent=s>=60?`${Math.floor(s/60)} 分 ${String(s%60).padStart(2,'0')} 秒`:`${s} 秒`;hc.classList.toggle('late',s<=(isBrief()?10:60))}
   const c=document.getElementById('clock');if(!c)return;const end=+c.dataset.end;if(!end){c.textContent='–';return}
   const s=Math.max(0,Math.round((end-now)/1000));c.textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');c.classList.toggle('late',s<=60)}
@@ -544,6 +576,7 @@ const H={
   stand(){send({t:'env',a:'stand'});if(Stage3D)Stage3D.stand();paintCtx()},
   book(v){envSend('book',8,{n:+v})},letter(v){envSend('letter',9,{n:+v})},tea(){envSend('tea',10)},light(){envSend('light',11)},
   narr(){Narr.toggle();render()},
+  music(){Snd.setMusic(!Snd.musicOn());render()},sfxt(){Snd.setSfx(!Snd.sfxOn());render()},
   narrvoice(){const n=Narr.nextVoice();if(n)toast('旁白聲音：'+n);render()},
   narrhelp(){toast(/iPhone|iPad/.test(navigator.userAgent)?'這台裝置沒有中文語音：到「設定 > 輔助使用 > 朗讀內容 > 聲音 > 中文」下載，再重新整理網頁。':'這台裝置沒有中文語音：到手機「設定」搜尋「文字轉語音」，下載中文（台灣）語音，再重新整理網頁。')},
   von(){Voice.enable()},vmic(){Voice.toggleMic()},voff(){Voice.disable()},
@@ -587,5 +620,5 @@ document.addEventListener('pointerdown',()=>{if(S)keepAwake()},{passive:true});
 document.addEventListener('gesturestart',e=>e.preventDefault());
 if(ui.join.length===4)wantRoom=null;
 render();connect();
-window.__ax={get ui(){return ui},narr:Narr,voice:Voice,get S(){return S},get me(){return me},get mode(){return mode},get online(){return online},stage:Stage3D,myId,send};
+window.__ax={snd:Snd,get ui(){return ui},narr:Narr,voice:Voice,get S(){return S},get me(){return me},get mode(){return mode},get online(){return online},stage:Stage3D,myId,send};
 })();

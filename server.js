@@ -4,7 +4,7 @@
 const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto');
 const E=require('./public/engine.js');
 const PORT=+process.env.PORT||3000,PUB=path.join(__dirname,'public');
-const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png'};
+const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg','.m4a':'audio/mp4','.wav':'audio/wav'};
 const RANGE=1.9,HOLD=3000;
 const BRIEF=process.env.BRIEF_SECONDS!==undefined?+process.env.BRIEF_SECONDS:null; // BRIEF_SECONDS is for testing only
 const ROUND_MS=S=>process.env.ROUND_SECONDS?+process.env.ROUND_SECONDS*1000:S.opts.roundMin*60000; // ROUND_SECONDS is for testing only
@@ -12,6 +12,7 @@ const ROUND_MS=S=>process.env.ROUND_SECONDS?+process.env.ROUND_SECONDS*1000:S.op
 const server=http.createServer((req,res)=>{
   let u=decodeURIComponent(req.url.split('?')[0]);if(u==='/')u='/index.html';
   if(u==='/healthz'){res.writeHead(200,{'content-type':'text/plain'});res.end('ok');return}
+  if(u==='/audio-list'){fs.readdir(path.join(PUB,'audio'),(e,f)=>{res.writeHead(200,{'content-type':'application/json','cache-control':'no-cache'});res.end(JSON.stringify(e?[]:f.filter(x=>/\.(mp3|ogg|m4a|wav)$/i.test(x))))});return}
   const f=path.normalize(path.join(PUB,u));
   if(!f.startsWith(PUB)){res.writeHead(403);res.end();return}
   fs.readFile(f,(e,d)=>{if(e){res.writeHead(404,{'content-type':'text/plain'});res.end('not found');return}
