@@ -186,6 +186,10 @@ function timeCues(now){
   for(const [th,msg] of [[300,'剩下五分鐘'],[60,'剩下一分鐘'],[10,'最後十秒']]){const k=(S.gid||'')+'|'+S.g.round+'|'+th;
     if(total>th&&rem<=th&&rem>th-4&&!cues[k]){cues[k]=1;Narr.say(`第 ${S.g.round} 日，${msg}。`)}}
 }
+function narrBtns(){const st=Narr.status();
+  if(st==='none')return'<button class="btn sm" disabled>旁白僅字幕</button>';
+  if(st==='nozh')return'<button class="btn sm" data-a="narrhelp">沒有中文語音</button>';
+  return`<button class="btn sm ${Narr.isOn()?'on':''}" data-a="narr">${Narr.isOn()?'旁白：開':'旁白：關'}</button>${Narr.voiceCount()>1&&Narr.isOn()?'<button class="btn sm" data-a="narrvoice">換聲音</button>':''}`}
 function hudHtml(){
   const g=S.g,G=GAMES[S.game];let a,b;
   if(S.phase==='lobby'){a='等待玩家';b=`${S.players.length} 人・需要 ${G.min}–${G.max} 人`}
@@ -193,7 +197,7 @@ function hudHtml(){
   else if(g.briefEnd){a='身分確認';b=`剩餘 <span id="hudclock" data-end="${g.briefEnd}">–</span> 後開始`}
   else if(S.game==='virus'){a=g.round>=1?`第 ${g.round} 日`:'準備階段';b=g.round>=1?`剩餘 <span id="hudclock" data-end="${g.roundStart+S.opts.roundMin*60000}">–</span>`:'第 1 日開始後計時'}
   else{a=`第 ${g.round} 回合`;b=`輪到${cStageName(S)}・共 ${S.opts.maxRounds} 回合`}
-  return`<div class="hud" id="hud"><div class="hudrow"><span class="hudday">${a}</span><span class="hudtime">${b}</span><button class="btn sm ${Narr.isOn()&&Narr.supported()?'on':''}" data-a="narr" ${Narr.supported()?'':'disabled'}>${Narr.supported()?(Narr.isOn()?'旁白：開':'旁白：關'):'旁白僅字幕'}</button></div><div class="hudcap" id="hudcap" aria-live="polite">${esc(Narr.caption())}</div></div>`}
+  return`<div class="hud" id="hud"><div class="hudrow"><span class="hudday">${a}</span><span class="hudtime">${b}</span>${narrBtns()}</div><div class="hudcap" id="hudcap" aria-live="polite">${esc(Narr.caption())}</div></div>`}
 function createRoom(){if(!send({t:'create',pid:myId,key:myKey,name:ui.nick.trim(),game:ui.game}))toast('還沒連上遊戲伺服器')}
 function joinRoom(code){code=(code||'').trim().toUpperCase();if(code.length!==4){toast('請輸入 4 碼房號');return}
   wantRoom=code;if(!send({t:'join',code,pid:myId,key:myKey,name:ui.nick.trim()}))toast('還沒連上遊戲伺服器')}
@@ -540,6 +544,8 @@ const H={
   stand(){send({t:'env',a:'stand'});if(Stage3D)Stage3D.stand();paintCtx()},
   book(v){envSend('book',8,{n:+v})},letter(v){envSend('letter',9,{n:+v})},tea(){envSend('tea',10)},light(){envSend('light',11)},
   narr(){Narr.toggle();render()},
+  narrvoice(){const n=Narr.nextVoice();if(n)toast('旁白聲音：'+n);render()},
+  narrhelp(){toast(/iPhone|iPad/.test(navigator.userAgent)?'這台裝置沒有中文語音：到「設定 > 輔助使用 > 朗讀內容 > 聲音 > 中文」下載，再重新整理網頁。':'這台裝置沒有中文語音：到手機「設定」搜尋「文字轉語音」，下載中文（台灣）語音，再重新整理網頁。')},
   von(){Voice.enable()},vmic(){Voice.toggleMic()},voff(){Voice.disable()},
   gnew(){ui.gpanel='new';ui.gsel=[];render()},
   ginv(){ui.gpanel='inv';ui.gsel=[];render()},
