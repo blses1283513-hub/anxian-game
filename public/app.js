@@ -15,7 +15,7 @@ const myKey=(()=>{const k='ax_key_'+myId;let v=ls.get(k);if(!v){v=Array.from(cry
 
 /* ============ session ============ */
 let S=null,mode=null,me=null,online='checking',tOff=0,ws=null,wantRoom=null,retry=0;
-const ui={nick:(ls.get('ax_nick')||''),game:'virus',join:(qs.get('room')||'').toUpperCase().slice(0,4),add:'',cover:false,hide:false,pick:null,t:null,sel:null,confirmNext:false,net:'',msg:'',ch:'',seen:{},gpanel:null,gsel:[],gname:'',ft:null,fakeOpen:false};
+const ui={nick:(ls.get('ax_nick')||''),game:'virus',join:(qs.get('room')||'').toUpperCase().slice(0,4),add:'',cover:false,hide:false,pick:null,t:null,sel:null,confirmNext:false,net:'',msg:'',ch:'',seen:{},gpanel:null,gsel:[],gname:'',ft:null,fakeOpen:false,tab:'',tabKey:'',privSeen:{}};
 let dict=null,dictOn=false,composing=false,pendingRender=false;
 function isHost(){return mode==='local'||(mode==='net'&&S&&S.hostId===me)}
 function send(o){if(ws&&ws.readyState===1){ws.send(JSON.stringify(o));return true}return false}
@@ -71,10 +71,13 @@ function vPolicy(pid){ // -1: no connection allowed, otherwise the volume (0..1)
   return 1}
 function vScope(){return vPlay()?(S.game==='virus'?'只聽得到同一間的人，離得越遠越小聲。':'只有同隊聽得到（小偷只聽得到小偷）。'):'現在所有人都聽得到。'}
 function paintVoice(){
-  const el=document.getElementById('vbar');if(!el)return;const v=Voice.st;let h;
+  paintVmini();const el=document.getElementById('vbar');if(!el)return;const v=Voice.st;let h;
   if(!Voice.supported())h='<span class="sub">語音通話需要 https 網址和支援的瀏覽器，這裡只能用文字交談。</span>';
   else if(!v.on)h=`<button class="btn sm pri" data-a="von">開啟語音通話</button><span class="sub">${v.err==='denied'?'麥克風權限被拒絕，請到瀏覽器設定允許後再按一次。':v.err?'無法啟動麥克風。':vScope()}</span>`;
   else{const can=canSpeak();h=`<button class="btn sm ${v.mic&&can?'on':''}" data-a="vmic" ${can?'':'disabled'}>${!can?'已出局，靜音':v.mic?'麥克風：開':'麥克風：關'}</button><button class="btn sm" data-a="voff">離開語音</button><span class="sub">語音連上 ${Voice.connected()} 人。${vScope()}</span>`}
+  if(el._h!==h){el._h=h;el.innerHTML=h}}
+function paintVmini(){const el=document.getElementById('vmini');if(!el)return;const v=Voice.st,can=canSpeak();
+  const h=!Voice.supported()||!inGame()?'':!v.on?'<button class="btn sm" data-a="von">語音通話</button>':`<button class="btn sm ${v.mic&&can?'on':''}" data-a="vmic" ${can?'':'disabled'}>${!can?'靜音':v.mic?'麥克風開':'麥克風關'}</button>`;
   if(el._h!==h){el._h=h;el.innerHTML=h}}
 Voice.send=o=>send(o);Voice.me=()=>myId;Voice.policy=vPolicy;Voice.canSpeak=canSpeak;Voice.onChange=()=>paintVoice();
 setInterval(()=>{if(!S||mode!=='net')return;paintVoice();
@@ -125,10 +128,10 @@ function briefBody(){
   return h;
 }
 let shufT=0,shufKey='';
-function briefView(){
+function briefCard(){
   const g=S.g,v=S.game==='virus',role=g.roles[me]&&g.roles[me]!=='?'?g.roles[me]:null,all=S.players.map(p=>p.id);
   const dealAt=g.briefEnd-S.opts.briefSec*1000,left=3000-(Date.now()+tOff-dealAt),still=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let h=topBar();
+  let h='';
   if(!role)h+=`<p class="note">這一局你是觀眾。其他人正在確認身分。</p>`;
   else if(left>0&&!still){clearTimeout(shufT);shufT=setTimeout(render,left+40);
     if(shufKey!==S.gid){shufKey=S.gid;setTimeout(()=>Snd.sfx('flip'),left)}
@@ -145,11 +148,10 @@ function briefView(){
         ${role==='corrupt'&&cor.length>1?`<div>另一名內鬼：<b>${cor.filter(id=>id!==me).map(id=>esc(nm(S,id))).join('、')}</b></div>`:''}`}
     h+=`<section class="dossier brief">${top}${briefBody()}</section>
       <p class="note">不要讓別人看到你的畫面。時間到會自動開始；開始後可以從身分卡的「完整身分說明」再打開這一頁。</p>`}
-  h+=`<section class="panel"><h3>場景載入中</h3><p class="sub">遊戲場景先在這裡準備好，開始後才能${v?'走動':'行動'}。</p>${stageSlot()}</section>`;
-  h+=hostCtl(ui.confirmNext?`<p class="sub">所有人都讀完了嗎？提早開始後就不能回到這一頁的倒數。</p><div class="row"><button class="btn pri grow" data-a="next">確定提早開始</button><button class="btn" data-a="cancel">取消</button></div>`
-    :`<p class="sub">時間到會自動開始。大家都說讀完了，可以提早開始。</p><button class="btn wide" data-a="asknext">提早開始</button>`);
-  return h+rulesHtml(S.game);
-}
+  return h}
+function briefHost(){return hostCtl(ui.confirmNext?`<p class="sub">所有人都讀完了嗎？提早開始後就不能回到這一頁的倒數。</p><div class="row"><button class="btn pri grow" data-a="next">確定提早開始</button><button class="btn" data-a="cancel">取消</button></div>`
+    :`<p class="sub">時間到會自動開始。大家都說讀完了，可以提早開始。</p><button class="btn wide" data-a="asknext">提早開始</button>`)}
+function briefView(){return topBar()+briefCard()+`<section class="panel"><h3>場景載入中</h3><p class="sub">遊戲場景先在這裡準備好，開始後才能${S.game==='virus'?'走動':'行動'}。</p>${stageSlot()}</section>`+briefHost()+rulesHtml(S.game)}
 setInterval(()=>{const e=document.getElementById('shuf');if(!e||!S||!S.g)return;const names=S.game==='virus'?Object.values(VR).map(r=>r.n):['小偷','警察','內鬼'];e.textContent=names[rnd(names.length)]},110);
 /* ---- narrator ---- */
 let nPub=null;const cues={};
@@ -264,6 +266,7 @@ function rulesHtml(game){
     <li>抗體保有者是其中一位市民：會被感染也會傳染，一日後自行痊癒，不會病死。</li>
     <li>獎勵（代幣）：恐怖分子勝各 4；市民方勝各 1、存活再 +1，研究員因解毒劑獲勝再 +1；搜查官在恐怖分子全滅時依達成日得 4/4/3/2/1；狂熱分子依死亡日得 3/2/2/1/0。</li>
     <li>連線對戰時，每個人在 3D 建築裡操控自己的角色：左下搖桿移動，拖曳畫面轉視角，右上角有小地圖。建築有兩個廳（圓桌廳、交誼廳）、六個房間（圖書室、置物間、茶水間、音樂室、儲藏室、醫務室）和連接它們的走廊。你只看得到、聽得到和你在同一個空間的人，走廊也算一個空間。</li>
+    <li>遊戲進行時用橫向畫面：左下搖桿走動、拖曳畫面轉視角，右上是小地圖，上方的「身分／交談／紀錄／選單」按一下打開、再按一下收起。手機直立拿著時畫面會自動轉 90 度，把手機橫過來即可。</li>
     <li>開局前可以在大廳選擇自己的造型（20 種，男女各 10），也可以微調髮型、髮色、膚色和服裝。座號照加入房間的順序編排。</li>
     <li>指定動作：每個技能開局會隨機配到一個只有你知道的動作，共 12 種。七種要走到對方旁邊做 3 秒：挽手臂、搭肩、比槍、遞東西、鞠躬、猜拳、拍背。五種要利用建築：和對方同坐交誼廳的長椅（每張 4 個座位）、到圖書室把對方座號的書倒過來、到置物間把信投進對方座號的置物櫃、對方在茶桌旁時為他倒茶、房間裡只有你和對方時關燈。系統自動判定，不需要任何人同意。</li>
     <li>所有人都能做這些動作，但只有符合自己指定動作的那一次會發動技能。系統不會通知任何人誰做了什麼，只有剛好在同一間看到的人才知道。倒放的書和置物櫃的信號旗會留到當日結束，任何人走進去都看得到；關燈的房間裡看不到名字和動作標示。</li>
@@ -277,6 +280,7 @@ function rulesHtml(game){
     <li>出局的人和結算時的所有人，角色會換成該身分的專屬造型。</li>
     <li>本版調整：感染者本人不會收到通知；指定動作是本版自己設計的。</li></ul></details>`;
   return`<details><summary>地鐵追捕規則</summary><ul>
+    <li>遊戲進行時用橫向畫面：左邊是路線圖（可拖曳旋轉、點車站），右邊是行動面板；上方的「行動／交談／紀錄／選單」可切換或收起。手機直立拿著時畫面會自動轉 90 度。</li>
     <li>小偷身分公開，位置不公開。10 個站藏有贓物，只有小偷看得到；收集 ${o.lootGoal} 件小偷方獲勝。</li>
     <li>開局先隨機抽身分，接著有 60 秒的身分確認時間，時間到自動開始，房主也可以提早開始。</li>
     <li>每回合小偷先動，接著各警隊依序行動，順序每回合輪換。最多 ${o.maxRounds} 回合。</li>
@@ -383,7 +387,7 @@ function chatHtml(){
     <div class="row">${chip('','公開')}${mates?chip('#team',tl):''}${groups.map(x=>chip(x.id,x.n)).join('')}${others.map(p=>chip(p.id,p.name)).join('')}${dead?'':`<button class="btn sm" data-a="gnew">＋群組</button>`}</div>
     ${panel||`<p class="sub">${sub}</p>${G&&!dead?`<div class="row"><button class="btn sm" data-a="ginv">加人</button><button class="btn sm" data-a="gleave">退出群組</button></div>`:''}
     <div class="msgs" id="msgs">${msgs.map(m=>`<div class="msg ${m.f===me?'mine':''} ${m.to?'wh':''}"><span class="who">${esc(nm(S,m.f))}</span><span class="tx">${esc(m.t)}</span></div>`).join('')||'<p class="sub">還沒有人說話。</p>'}</div>
-    ${dead?'<p class="note">死者不能發言。</p>':`<div class="row"><div class="grow"><input type="text" id="msg" data-in="msg" maxlength="200" value="${esc(ui.msg)}" placeholder="${G?'對群組說…':ui.ch==='#team'?'對隊友說…':ui.ch?'悄悄話…':'對所有人說…'}" autocomplete="off"></div>
+    ${dead?'<p class="note">死者不能發言。</p>':`<div class="row inrow"><div class="grow"><input type="text" id="msg" data-in="msg" maxlength="200" value="${esc(ui.msg)}" placeholder="${G?'對群組說…':ui.ch==='#team'?'對隊友說…':ui.ch?'悄悄話…':'對所有人說…'}" autocomplete="off"></div>
       ${dict?`<button class="btn ${dictOn?'on':''}" id="mic" data-a="mic">${dictOn?'停止':'語音'}</button>`:''}<button class="btn pri" data-a="say">送出</button></div>`}`}</section>`;
 }
 function stageSlot(){return`<div id="stage-slot">${Stage3D?'':S.game==='chase'?'<div class="map">'+mapSvg()+'</div>':'<p class="note">這台裝置無法顯示 3D 場景，請房主把「技能怎麼發動」改成直接按按鈕。</p>'}</div>`}
@@ -410,14 +414,17 @@ function fakeHtml(){
 }
 function hostCtl(inner){return isHost()?`<section class="panel"><h3>房主控制</h3>${inner}</section>`:''}
 
-function virusView(){
-  const g=S.g,all=S.players.map(p=>p.id),role=g.roles[me]&&g.roles[me]!=='?'?g.roles[me]:null,alive=all.filter(id=>g.alive[id]),g3=S.opts.verify==='3d'&&mode==='net';
+function vStripHtml(){
+  const g=S.g,alive=S.players.filter(p=>g.alive[p.id]);
   const end=g.round>=1?g.roundStart+S.opts.roundMin*60000:0;
-  let h=topBar()+`<div class="strip"><div><div class="k">日</div><div class="v">${g.round||'–'}/${S.opts.rounds}</div></div>
+  return`<div class="strip"><div><div class="k">日</div><div class="v">${g.round||'–'}/${S.opts.rounds}</div></div>
     <div><div class="k">剩餘時間</div><div class="v" id="clock" data-end="${end}">–</div></div>
     <div><div class="k">存活</div><div class="v">${alive.length}</div></div>
     <div><div class="k">解毒劑</div><div class="v">${g.stats.cure}/2</div></div></div>
-    <p class="sub">前一日結算：感染 ${g.stats.inf} 人，死亡 ${g.stats.dead} 人。${g.round===0?'現在是自由活動時間，可以先走動、聊天、練習動作。':''}</p>`+stageSlot();
+    <p class="sub">前一日結算：感染 ${g.stats.inf} 人，死亡 ${g.stats.dead} 人。${g.round===0?'現在是自由活動時間，可以先走動、聊天、練習動作。':''}</p>`}
+function vIdHtml(){
+  const g=S.g,all=S.players.map(p=>p.id),role=g.roles[me]&&g.roles[me]!=='?'?g.roles[me]:null,alive=all.filter(id=>g.alive[id]),g3=S.opts.verify==='3d'&&mode==='net';
+  let h='';
   if(role){
     const R=VR[role],mates=S.opts.knowMates&&(role==='T'||role==='R')?vTeam(S,role).filter(id=>id!==me):[];
     const tasks=g3?(VSK[role]||[]).map(k=>[k,vTask(S,me,k)]).filter(x=>x[1]):[];
@@ -441,13 +448,12 @@ function virusView(){
       if(g3)h+=fakeHtml();
     }else h+=`<p class="note">你已死亡。你還可以轉動視角觀看，但不能移動、發言或使用技能。</p>`;
   }else h+=`<p class="note">這一局你是觀眾。</p>`;
-  h+=chatHtml();
-  h+=hostCtl(g.round===0?`<button class="btn pri wide" data-a="next">開始第 1 日</button>`:
+  return h}
+function vHostHtml(){const g=S.g;return hostCtl(g.round===0?`<button class="btn pri wide" data-a="next">開始第 1 日</button>`:
     ui.confirmNext?`<p class="sub">結算後病毒會擴散，感染到期的人會死亡。</p><div class="row"><button class="btn pri grow" data-a="next">確定結束第 ${g.round} 日</button><button class="btn" data-a="cancel">取消</button></div>`
-    :`<p class="sub">時間到會自動結算，也可以提早結束。</p><button class="btn wide" data-a="asknext">提早結束第 ${g.round} 日並結算</button>`);
-  h+=`<section class="panel"><h3>玩家</h3><div class="plist">${all.map(id=>`<div class="pl ${g.alive[id]?'':'dead'} ${id===me?'me':''}" data-sp="${esc(id)}"><span>${esc(sn(id))}</span><span class="tag">${g.alive[id]||!VR[g.roles[id]]?'':VR[g.roles[id]].n}</span></div>`).join('')}</div></section>`;
-  return h+logHtml()+rulesHtml('virus');
-}
+    :`<p class="sub">時間到會自動結算，也可以提早結束。</p><button class="btn wide" data-a="asknext">提早結束第 ${g.round} 日並結算</button>`)}
+function vPlayersHtml(){const g=S.g,all=S.players.map(p=>p.id);return`<section class="panel"><h3>玩家</h3><div class="plist">${all.map(id=>`<div class="pl ${g.alive[id]?'':'dead'} ${id===me?'me':''}" data-sp="${esc(id)}"><span>${esc(sn(id))}</span><span class="tag">${g.alive[id]||!VR[g.roles[id]]?'':VR[g.roles[id]].n}</span></div>`).join('')}</div></section>`}
+function virusView(){return topBar()+vStripHtml()+stageSlot()+vIdHtml()+chatHtml()+vHostHtml()+vPlayersHtml()+logHtml()+rulesHtml('virus')}
 function mapSvg(){
   const g=S.g,role=g.roles[me],over=S.phase==='over',all=S.players.map(p=>p.id);
   const seeTh=over||role==='thief'||role==='corrupt',seeLoot=over||role==='thief';
@@ -470,15 +476,17 @@ function mapSvg(){
   });
   return s+`</svg>`;
 }
-function chaseView(){
-  const g=S.g,all=S.players.map(p=>p.id),role=g.roles[me],active=cActive(S),waiting=active.filter(id=>!g.done[id]);
-  const thieves=all.filter(id=>g.roles[id]==='thief');
-  let h=topBar()+`<div class="strip"><div><div class="k">回合</div><div class="v">${g.round}/${S.opts.maxRounds}</div></div>
+function cStripHtml(){
+  const g=S.g,all=S.players.map(p=>p.id),thieves=all.filter(id=>g.roles[id]==='thief');
+  return`<div class="strip"><div><div class="k">回合</div><div class="v">${g.round}/${S.opts.maxRounds}</div></div>
     <div><div class="k">行動中</div><div class="v" style="font-family:var(--body);font-size:16px">${cStageName(S)}</div></div>
     <div><div class="k">贓物</div><div class="v">${g.got}/${S.opts.lootGoal}</div></div>
-    <div><div class="k">在逃</div><div class="v">${thieves.filter(id=>!g.arrested[id]).length}</div></div></div>
-    <p class="sub">還沒結束行動：${waiting.map(id=>esc(nm(S,id))).join('、')||'無'}</p>`;
-  h+=stageSlot()+`<p class="sub">${Stage3D?'可左右拖曳旋轉，也可以直接點車站。圓錐':'圓點'}是警察（紅、藍、綠隊）${role==='thief'||role==='corrupt'?(Stage3D?'，桃紅色菱形是小偷':'，菱形是小偷'):''}${role==='thief'?'，金色方塊是贓物':''}${role&&role!=='thief'?'。金圈是查到痕跡的站，虛線圈是沒有痕跡':''}。</p>`;
+    <div><div class="k">在逃</div><div class="v">${thieves.filter(id=>!g.arrested[id]).length}</div></div></div>`}
+function cWaitHtml(){const g=S.g,waiting=cActive(S).filter(id=>!g.done[id]);return`<p class="sub">還沒結束行動：${waiting.map(id=>esc(nm(S,id))).join('、')||'無'}</p>`}
+function cLegendHtml(){const role=S.g.roles[me];return`<p class="sub">${Stage3D?'可左右拖曳旋轉，也可以直接點車站。圓錐':'圓點'}是警察（紅、藍、綠隊）${role==='thief'||role==='corrupt'?(Stage3D?'，桃紅色菱形是小偷':'，菱形是小偷'):''}${role==='thief'?'，金色方塊是贓物':''}${role&&role!=='thief'?'。金圈是查到痕跡的站，虛線圈是沒有痕跡':''}。</p>`}
+function cIdHtml(){
+  const g=S.g,all=S.players.map(p=>p.id),role=g.roles[me],active=cActive(S);
+  let h='';
   if(role){
     const b=g.budget[me],here=g.pos[me],my=active.includes(me)&&!g.done[me];
     if(my){
@@ -505,24 +513,23 @@ function chaseView(){
       h+=ui.pick?pickHtml():`<section class="panel"><h3>指認內鬼</h3><p class="sub">${g.accuse[me]?'目前指認：'+esc(nm(S,g.accuse[me]))+'。':'還沒指認。'}結算時揭曉，可以更改。</p><button class="btn" data-a="pick" data-v="accuse">選一名隊友</button></section>`;
     }
   }else h+=`<p class="note">這一局你是觀眾。</p>`;
-  h+=chatHtml();
-  h+=hostCtl(ui.confirmNext?`<p class="sub">還沒按結束的人會直接被跳過。</p><div class="row"><button class="btn pri grow" data-a="next">確定結束${cStageName(S)}的行動</button><button class="btn" data-a="cancel">取消</button></div>`
-    :`<p class="sub">有人離席時可以直接跳過。</p><button class="btn wide" data-a="asknext">強制結束${cStageName(S)}的行動</button>`);
-  h+=`<section class="panel"><h3>玩家</h3><div class="plist">${all.map(id=>`<div class="pl ${g.arrested[id]?'dead':''} ${id===me?'me':''}" data-sp="${esc(id)}"><span>${esc(nm(S,id))}</span><span class="tag">${g.roles[id]==='thief'?'小偷':TEAMS[g.team[id]]}</span></div>`).join('')}</div></section>`;
-  return h+logHtml()+rulesHtml('chase');
-}
-function overView(){
+  return h}
+function cHostHtml(){return hostCtl(ui.confirmNext?`<p class="sub">還沒按結束的人會直接被跳過。</p><div class="row"><button class="btn pri grow" data-a="next">確定結束${cStageName(S)}的行動</button><button class="btn" data-a="cancel">取消</button></div>`
+    :`<p class="sub">有人離席時可以直接跳過。</p><button class="btn wide" data-a="asknext">強制結束${cStageName(S)}的行動</button>`)}
+function cPlayersHtml(){const g=S.g,all=S.players.map(p=>p.id);return`<section class="panel"><h3>玩家</h3><div class="plist">${all.map(id=>`<div class="pl ${g.arrested[id]?'dead':''} ${id===me?'me':''}" data-sp="${esc(id)}"><span>${esc(nm(S,id))}</span><span class="tag">${g.roles[id]==='thief'?'小偷':TEAMS[g.team[id]]}</span></div>`).join('')}</div></section>`}
+function chaseView(){return topBar()+cStripHtml()+cWaitHtml()+stageSlot()+cLegendHtml()+cIdHtml()+chatHtml()+cHostHtml()+cPlayersHtml()+logHtml()+rulesHtml('chase')}
+function overParts(){
   const g=S.g,R=S.result,v=S.game==='virus';
   const rows=S.players.map(({id,name})=>{
     const role=v?VR[g.roles[id]].n+(g.antibody===id?'・抗體':''):({thief:'小偷',cop:'警察',corrupt:'內鬼'}[g.roles[id]]+(g.roles[id]==='thief'?'':'・'+TEAMS[g.team[id]]));
     const st=v?(g.alive[id]?'存活':'第 '+g.deathRound[id]+' 日死亡')+'・座號 '+g.seat[id]+'・感染序號 '+g.num[id]+' 號':(g.roles[id]==='thief'?(g.arrested[id]?'被捕':'在逃'):(g.accuse[id]?'指認 '+nm(S,g.accuse[id]):'未指認'));
     return`<tr><td>${esc(name)}${id===me?'（你）':''}</td><td>${role}</td><td>${esc(st)}</td><td class="n">+${R.rw[id]||0}</td></tr>`}).join('');
-  return topBar()+`<section class="banner"><h2>${R.title}</h2><p class="sub">${esc(R.why)}</p></section>
-    ${stageSlot()}
-    <section class="panel"><h3>身分揭曉與代幣</h3><div class="scroll"><table><thead><tr><th>玩家</th><th>身分</th><th>結果</th><th style="text-align:right">代幣</th></tr></thead><tbody>${rows}</tbody></table></div></section>
-    ${isHost()?`<button class="btn pri wide" data-a="again">同一批人再來一局</button>`:''}
-    <section class="panel"><h3>公開紀錄</h3><div class="log">${S.pub.slice().reverse().map(l=>`<div><span class="r">${S.game==='virus'?'D':'R'}${l.r}</span><span>${esc(l.t)}</span></div>`).join('')}</div></section>`;
+  return{banner:`<section class="banner"><h2>${R.title}</h2><p class="sub">${esc(R.why)}</p></section>`,
+    table:`<section class="panel"><h3>身分揭曉與代幣</h3><div class="scroll"><table><thead><tr><th>玩家</th><th>身分</th><th>結果</th><th style="text-align:right">代幣</th></tr></thead><tbody>${rows}</tbody></table></div></section>`,
+    again:isHost()?`<button class="btn pri wide" data-a="again">同一批人再來一局</button>`:'',
+    log:`<section class="panel"><h3>公開紀錄</h3><div class="log">${S.pub.slice().reverse().map(l=>`<div><span class="r">${S.game==='virus'?'D':'R'}${l.r}</span><span>${esc(l.t)}</span></div>`).join('')}</div></section>`};
 }
+function overView(){const o=overParts();return topBar()+o.banner+stageSlot()+o.table+o.again+o.log}
 function coverView(){
   const g=S.g,need=S.phase!=='play'?[]:S.game==='chase'?cActive(S).filter(id=>!g.done[id]):[];
   return topBarLite()+`<section class="panel cover"><h2>把裝置交給下一位</h2><p class="sub">點自己的名字才會顯示身分。別人拿著的時候請不要偷看。</p>
@@ -533,12 +540,82 @@ function coverView(){
 }
 function topBarLite(){return hudHtml()+`<div class="row between"><div><h2>${GAMES[S.game].name}</h2><span class="sub">單機輪流</span></div><button class="btn sm" data-a="leave">離開</button></div>`}
 
+/* ---- landscape game screen (online play): the scene fills the screen; everything else sits in a slim top bar and a side drawer ---- */
+const coarse=!!(window.matchMedia&&matchMedia('(pointer:coarse)').matches),rootEl=document.getElementById('root');
+const gsOn=()=>!!(mode==='net'&&S&&S.g&&(S.phase==='play'||S.phase==='over'));
+function gsTabs(){
+  if(S.phase==='over')return[['res','結果'],['log','紀錄'],['menu','選單']];
+  if(isBrief())return[['id','身分'],['menu','選單']];
+  return S.game==='virus'?[['id','身分'],['chat','交談'],['log','紀錄'],['menu','選單']]:[['act','行動'],['chat','交談'],['log','紀錄'],['menu','選單']]}
+function gsDefault(){const k=S.gid+'|'+S.phase+'|'+(isBrief()?'b':'p');if(ui.tabKey===k)return;ui.tabKey=k;ui.tab=S.phase==='over'?'res':isBrief()?'id':S.game==='chase'?'act':''}
+function chatUnread(){
+  if(!inGame())return 0;const c=S.game==='chase'&&S.g,th=c&&S.g.roles[me]==='thief',tk=c?(th?'#th':'#t'+S.g.team[me]):'';let n=0;
+  for(const m of S.chat||[]){if(m.f===me)continue;const ch=!m.to?'':m.to===tk?'#team':String(m.to).startsWith('#g')?m.to:m.to===me?m.f:null;if(ch!=null&&m.i>(ui.seen[me+'|'+ch]||0))n++}
+  return n}
+function gsTop(){
+  const g=S.g,v=S.game==='virus';let info;
+  if(S.phase==='over')info=`<span class="hudday">遊戲結束</span><span class="kv">${S.result?esc(S.result.title):''}</span>`;
+  else if(isBrief())info=`<span class="hudday">身分確認</span><span class="hudtime">剩餘 <span id="hudclock" data-end="${g.briefEnd}">–</span> 後開始</span>`;
+  else if(v){const alive=S.players.filter(p=>g.alive[p.id]).length;
+    info=`<span class="hudday">${g.round>=1?'第 '+g.round+' 日':'準備階段'}</span><span class="hudtime">${g.round>=1?`剩餘 <span id="hudclock" data-end="${g.roundStart+S.opts.roundMin*60000}">–</span>`:'尚未計時'}</span>
+      <span class="kv">存活 <b>${alive}</b></span><span class="kv">解毒劑 <b>${g.stats.cure}/2</b></span><span class="kv opt">前一日感染 <b>${g.stats.inf}</b>・死亡 <b>${g.stats.dead}</b></span>`}
+  else{const th=S.players.filter(p=>g.roles[p.id]==='thief'&&!g.arrested[p.id]).length;
+    info=`<span class="hudday">第 ${g.round} 回合</span><span class="hudtime">輪到${cStageName(S)}</span><span class="kv">贓物 <b>${g.got}/${S.opts.lootGoal}</b></span><span class="kv">在逃 <b>${th}</b></span><span class="kv opt">共 ${S.opts.maxRounds} 回合</span>`}
+  const pn=(S.priv[me]||[]).length;if(ui.tab==='log')ui.privSeen[S.gid]=pn;
+  const un={chat:ui.tab==='chat'?0:chatUnread(),log:Math.max(0,pn-(ui.privSeen[S.gid]||0))};
+  return`<div class="gs-top"><div class="gs-info">${info}${ui.net?`<span class="kv late">${ui.net}</span>`:''}</div>
+    <div class="gs-tabs"><span id="vmini"></span>${gsTabs().map(([k,l])=>`<button class="btn sm ${ui.tab===k?'on':''}" data-a="tab" data-v="${k}">${l}${un[k]?` <b class="un">${un[k]}</b>`:''}</button>`).join('')}</div></div>`}
+function menuHtml(){
+  const v=S.game==='virus';
+  return`<section class="panel"><h3>聲音與語音</h3><div class="row hudbtns">${narrBtns()}${sndBtns()}</div>${inGame()?'<div id="vbar" class="vbar"></div>':''}</section>
+    ${S.phase==='over'?'':isBrief()?briefHost():v?vHostHtml():cHostHtml()}
+    <section class="panel"><div class="row between"><div><h2>${GAMES[S.game].name}</h2><span class="sub">房號 ${esc(S.code)}${S.hostId===me?'・你是房主':''}</span></div><button class="btn sm" data-a="leave">離開</button></div>
+      <p class="sub">遊戲進行時固定用橫向畫面。手機直立拿著時畫面會自動轉 90 度，把手機橫過來就可以了。</p></section>
+    ${rulesHtml(S.game)}`}
+function gsSide(){
+  const t=ui.tab,v=S.game==='virus';if(!t)return'';let h='';
+  if(t==='res'){const o=overParts();h=o.banner+o.table+o.again}
+  else if(t==='id')h=isBrief()?briefCard()+`<p class="note">不要讓別人看到你的畫面。時間到會自動開始。</p>`+briefHost():vIdHtml();
+  else if(t==='act')h=cWaitHtml()+cIdHtml()+cLegendHtml();
+  else if(t==='chat')h=chatHtml()||'<p class="note">觀眾不能發言。</p>';
+  else if(t==='log')h=(S.phase==='over'?'':v?vPlayersHtml():cPlayersHtml())+logHtml();
+  else if(t==='menu')h=menuHtml();
+  return`<aside class="gs-side" id="side" data-tab="${t}">${h}</aside>`}
+function gsView(){
+  gsDefault();if(ui.tab&&!gsTabs().some(x=>x[0]===ui.tab))ui.tab='';
+  const side=gsSide();
+  return`<div class="gs ${isBrief()||S.phase==='over'?'wide':''} ${side?'open':''} g-${S.game}">${gsTop()}<div class="gs-main"><div class="gs-stage">${stageSlot()}</div>${side}</div></div>`}
+// what sits on top of the scene: the narrator's caption and the skill that is waiting for its action
+function stageHud(){
+  if(!gsOn())return'';const a=ui.armed,t=a&&S.game==='virus'&&S.phase==='play'?armedTask():null;
+  return`<div class="hudcap" id="hudcap" aria-live="polite">${esc(Narr.caption())}</div>${t?`<div class="cx armedx"><span>已準備「${SKN[a.k]}」→ ${esc(sn(a.t))}：${t[0]}</span><button class="btn sm" data-a="disarm">取消</button></div>`:''}`}
+// the phone is held upright: turn the whole game a quarter so it reads right once the phone is on its side
+const portrait=()=>{const so=screen.orientation;if(so&&so.type)return so.type.startsWith('portrait');if(typeof window.orientation==='number')return window.orientation%180===0;return innerHeight>innerWidth};
+function layout(){
+  const game=document.body.classList.contains('game'),vv=window.visualViewport,W=Math.round(vv?vv.width:innerWidth),H=Math.round(vv?vv.height:innerHeight),ox=vv?vv.offsetLeft:0,oy=vv?vv.offsetTop:0;
+  const rot=game&&coarse&&portrait();document.body.classList.toggle('rot',rot);
+  if(!game)rootEl.style.cssText='';
+  else if(rot){rootEl.style.width=H+'px';rootEl.style.height=W+'px';rootEl.style.transform=`translate(${W+ox}px,${oy}px) rotate(90deg)`}
+  else{rootEl.style.width=W+'px';rootEl.style.height=H+'px';rootEl.style.transform=ox||oy?`translate(${ox}px,${oy}px)`:''}
+  if(Stage3D){Stage3D.rot=rot;if(Stage3D.el.isConnected)Stage3D.resize()}}
+window.addEventListener('resize',layout);window.addEventListener('orientationchange',()=>setTimeout(layout,250));
+if(window.visualViewport){visualViewport.addEventListener('resize',layout);visualViewport.addEventListener('scroll',layout)}
+// Android can really lock the screen sideways (needs full screen and a tap); iPhones cannot, they get the quarter turn above
+let lockTried='';
+function tryLock(){
+  if(!gsOn()||!coarse||lockTried===S.gid)return;lockTried=S.gid;const so=screen.orientation,de=document.documentElement;
+  if(!so||!so.lock||!de.requestFullscreen||!portrait())return;
+  de.requestFullscreen({navigationUI:'hide'}).then(()=>so.lock('landscape')).catch(()=>{if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})})}
+function unlock(){lockTried='';try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock()}catch(e){}if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}
+document.addEventListener('pointerup',tryLock,{passive:true});
+
 function view(){
   if(!S)return homeView();
   if(S.phase==='lobby')return lobbyView();
   if(mode==='local'&&S.phase==='over'){me=null;return overView()}
   if(mode==='local'&&(ui.cover||!me))return coverView();
   if(mode==='net'&&!S.g)return lobbyView();
+  if(gsOn())return gsView();
   if(S.phase==='over')return overView();
   if(isBrief())return briefView();
   return S.game==='virus'?virusView():chaseView();
@@ -547,11 +624,16 @@ function render(){
   if(composing){pendingRender=true;return}
   const a=document.activeElement,fid=a&&a.id,pos=a&&a.selectionStart;
   const om=document.getElementById('msgs'),stick=!om||om.scrollTop+om.clientHeight>=om.scrollHeight-30,otop=om?om.scrollTop:0;
+  const osd=document.getElementById('side'),sdTab=osd&&osd.dataset.tab,sdTop=osd?osd.scrollTop:0;
   if(Stage3D&&Stage3D.el.parentNode)Stage3D.el.remove();
+  const game=gsOn(),was=document.body.classList.contains('game');document.body.classList.toggle('game',game);if(was&&!game)unlock();layout();
+  if(Stage3D)Stage3D.fill=game;
   ui._acts=[];app.innerHTML=view();
+  const nsd=document.getElementById('side');if(nsd&&nsd.dataset.tab===sdTab)nsd.scrollTop=sdTop;
   const slot=document.getElementById('stage-slot');
   if(Stage3D)Stage3D.walk=mode==='net'&&!isBrief();
-  if(slot&&Stage3D&&S&&S.g)Stage3D.attach(slot,S,me,ui,(kind,id)=>{if(kind==='virus'){if(id===me)return;if(ui.pick&&ui.pick.targets.includes(id))H.target(id);else if(mode==='net'&&S.opts.verify==='3d'&&S.g.alive[id]!==false&&S.g.alive[me]){ui.ft=id;ui.fakeOpen=true;render()}}else H.st(id)});
+  if(slot&&Stage3D&&S&&S.g)Stage3D.attach(slot,S,me,ui,(kind,id)=>{if(kind==='virus'){if(id===me)return;if(ui.pick&&ui.pick.targets.includes(id))H.target(id);else if(mode==='net'&&S.opts.verify==='3d'&&S.phase==='play'&&!isBrief()&&S.g.alive[id]!==false&&S.g.alive[me]){ui.ft=id;ui.fakeOpen=true;if(gsOn())ui.tab='id';render()}}else H.st(id)});
+  if(Stage3D)Stage3D.setHud(stageHud());
   const nmg=document.getElementById('msgs');if(nmg)nmg.scrollTop=stick?nmg.scrollHeight:otop;
   paintVoice();paintCtx();Snd.scene(musicScene());
   if(fid){const n=document.getElementById(fid);if(n&&n!==document.activeElement){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}}
@@ -575,6 +657,7 @@ app.addEventListener('keydown',e=>{if(e.key!=='Enter'||e.isComposing)return;cons
 app.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(!el||el.disabled)return;const f=H[el.dataset.a];if(f)f(el.dataset.v,el)});
 const H={
   pickgame(v){ui.game=v;render()},
+  tab(v){ui.tab=ui.tab===v?'':v;render()},
   create(){createRoom()},join(){joinRoom(ui.join)},rejoin(v){joinRoom(v)},
   local(){startLocal(false)},localresume(){startLocal(true)},
   leave(){leave()},
@@ -590,7 +673,7 @@ const H={
   copy(){const t=location.origin+'/?room='+S.code;(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('已複製邀請網址'),()=>{const e=document.getElementById('share');if(e){const r=document.createRange();r.selectNodeContents(e);const s=getSelection();s.removeAllRanges();s.addRange(r)}toast('請長按網址複製')})},
   faketoggle(){ui.fakeOpen=!ui.fakeOpen},
   ftarget(v){ui.ft=v;ui.fakeOpen=true;render()},
-  fake(v){if(!ui.ft||!Stage3D)return;const e=Stage3D.gesture(+v,ui.ft,'',nm(S,ui.ft));if(e)toast(e)},
+  fake(v){if(!ui.ft||!Stage3D)return;const e=Stage3D.gesture(+v,ui.ft,'',nm(S,ui.ft));if(e)toast(e);else if(gsOn()){ui.tab='';render()}},
   gstop(){if(Stage3D)Stage3D.stop()},
   disarm(){ui.armed=null;render();paintCtx()},
   sit(v){ui.bench=+v;envSend('sit',7,{b:+v})},
@@ -616,9 +699,9 @@ const H={
   target(v){ui.t=v;render()},
   confirm(){if(!ui.pick||!ui.t)return;const a={k:ui.pick.k,t:ui.t};
     if(S.game==='virus'&&mode==='net'&&S.opts.verify==='3d'&&a.t!==me){const task=vTask(S,me,a.k);if(!Stage3D||!task){toast('這台裝置無法顯示 3D 場景');return}
-      if(task[1]>=7){ui.armed={k:a.k,t:a.t};ui.pick=null;ui.t=null;toast('已準備「'+SKN[a.k]+'」，去完成指定動作');render();
+      if(task[1]>=7){ui.armed={k:a.k,t:a.t};ui.pick=null;ui.t=null;toast('已準備「'+SKN[a.k]+'」，去完成指定動作');if(gsOn())ui.tab='';render();
         if(task[1]===7&&Stage3D.debug().seated&&ui.bench!=null)envSend('sit',7,{b:ui.bench});paintCtx();return}
-      ui.armed=null;const e=Stage3D.gesture(task[1],a.t,a.k,nm(S,a.t));if(e){toast(e);return}ui.pick=null;ui.t=null;render();const s=document.getElementById('stage-slot');if(s)s.scrollIntoView({block:'nearest',behavior:'smooth'});return}
+      ui.armed=null;const e=Stage3D.gesture(task[1],a.t,a.k,nm(S,a.t));if(e){toast(e);return}ui.pick=null;ui.t=null;if(gsOn())ui.tab='';render();const s=document.getElementById('stage-slot');if(s)s.scrollIntoView({block:'nearest',behavior:'smooth'});return}
     if(mode==='net'){ui.pick=null;ui.t=null}go(a);if(mode==='net')render()},
   st(v){ui.sel=+v;render()},
   moveto(v){ui.sel=null;go({k:'move',to:+v})},
@@ -644,5 +727,5 @@ document.addEventListener('pointerdown',()=>{if(S)keepAwake()},{passive:true});
 document.addEventListener('gesturestart',e=>e.preventDefault());
 if(ui.join.length===4)wantRoom=null;
 render();connect();
-window.__ax={snd:Snd,get ui(){return ui},narr:Narr,voice:Voice,get S(){return S},get me(){return me},get mode(){return mode},get online(){return online},stage:Stage3D,myId,send};
+window.__ax={tab(v){ui.tab=v;render()},snd:Snd,get ui(){return ui},narr:Narr,voice:Voice,get S(){return S},get me(){return me},get mode(){return mode},get online(){return online},stage:Stage3D,myId,send};
 })();
