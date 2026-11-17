@@ -121,6 +121,7 @@ function onMsg(c,m){
     if(a.k==='kick'){const k=R.cl.get(a.t);if(k){wsSend(k.sock,{t:'gone',m:'你被房主移出房間'});R.cl.delete(a.t);k.room=null}voiceOff(R,a.t)}
     if(was==='lobby'&&S.phase==='play'&&S.game==='virus'){spawn(R);pushState(R);for(const [id,k] of R.cl){k.vroom=viewRoom(R,id);k.vphase=S.phase;sendAllPos(R,k,1)}return}
     pushState(R);return}
+  if(process.env.TEST_HOOKS&&m.t==='dbg'&&m.ab&&S.g){wsSend(c.sock,{t:'dbgab',id:S.g.antibody||''});return}                      // tests only: who carries the antibody
   if(process.env.TEST_HOOKS&&m.t==='dbg'&&S.g&&S.g.task&&S.g.task[pid]){S.g.task[pid][m.k]=m.gi;pushState(R);return}   // tests only: choose my own secret condition
   if(m.t==='pos'){
     const q=R.pos[pid];if(!q||S.phase!=='play'||S.game!=='virus'||!S.g.alive[pid])return;

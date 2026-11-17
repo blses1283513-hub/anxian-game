@@ -58,7 +58,7 @@ function act(S,pid,a,isHost){
 /* ============ 感染戰 ============ */
 const VR={
   T:{n:'恐怖分子',f:'恐怖分子陣營',c:'threat',d:['病毒：全隊只有一次，指定 1 人感染','子彈：你個人一次，立刻擊殺 1 人','解毒劑：你個人一次，治好 1 名感染者（可用在自己）','勝利：至少一名恐怖分子存活，其餘玩家除抗體保有者外全部死亡']},
-  C:{n:'一般市民',f:'市民陣營',c:'safe',d:['沒有主動技能','勝利：恐怖分子全滅，或解毒劑製成']},
+  C:{n:'一般市民',f:'市民陣營',c:'safe',d:['沒有主動技能','你可能帶有抗體，但自己不會知道；讓研究員對你製藥才查得出來','勝利：恐怖分子全滅，或解毒劑製成']},
   R:{n:'研究員',f:'市民陣營',c:'safe',d:['製藥：每日指定 1 名受試者；對方是抗體保有者才成功','全隊每日最多成功 1 次，累計 2 次解毒劑完成，市民立刻獲勝','第 1 次成功後，下一日會全場公告「製造準備中」']},
   J:{n:'記者',f:'市民陣營',c:'safe',d:['查驗：每日確認 1 名玩家的角色','看不出對方有沒有抗體']},
   I:{n:'搜查官',f:'中立',c:'neutral',d:['子彈：每日可擊殺 1 人','勝利：恐怖分子全部死亡；越早達成獎勵越高']},
@@ -120,7 +120,7 @@ function vDeal(S){
   const cs=ids.filter(id=>g.roles[id]==='C');g.antibody=cs[rnd(cs.length)];
   g.task={};
   ids.forEach(id=>{const pool=shuffle(TASKS.map((_,i)=>i));g.task[id]={x:0};(VSK[g.roles[id]]||[]).forEach((k,i)=>g.task[id][k]=pool[i])});
-  pub(S,`本局共 ${ids.length} 人：${[['T','恐怖分子'],['R','研究員'],['J','記者'],['I','搜查官'],['F','狂熱分子'],['C','一般市民']].filter(([k])=>c[k]>0).map(([k,n])=>n+' '+c[k]+' 人').join('、')}。其中一位市民是抗體保有者。`);
+  pub(S,`本局共 ${ids.length} 人：${[['T','恐怖分子'],['R','研究員'],['J','記者'],['I','搜查官'],['F','狂熱分子'],['C','一般市民']].filter(([k])=>c[k]>0).map(([k,n])=>n+' '+c[k]+' 人').join('、')}。其中一位一般市民帶有抗體，連本人都不知道。`);
   g.briefEnd=S.opts.briefSec>0?Date.now()+S.opts.briefSec*1000:0;
   pub(S,g.briefEnd?`身分已發下。請在 ${S.opts.briefSec} 秒內閱讀自己的身分說明，不要讓別人看到你的畫面。時間到自動開始第 1 日。`:'身分已發下。房主開始第 1 日後技能才能使用。');
 }
@@ -302,7 +302,7 @@ function redact(S,pid){
   if(S.game==='virus'){
     const know=S.opts.knowMates&&(role==='T'||role==='R');
     for(const id in g.roles)if(!(id===pid||!g.alive[id]||(know&&g.roles[id]===role)))v.roles[id]='?';
-    v.num={};if(role)v.num[pid]=g.num[pid];v.antibody=g.antibody===pid?pid:'';v.inf={x:0};
+    v.num={};if(role)v.num[pid]=g.num[pid];v.antibody='';v.inf={x:0};        // nobody is told who carries the antibody, not even the carrier; it is revealed with the results
     v.task={};if(g.task[pid])v.task[pid]=g.task[pid];
     v.used={};v.used[pid]=g.used[pid]||{x:0};v.ru={};v.ru[pid]=g.ru[pid]||{x:0};
     if(role!=='T')v.virusUsed=false;

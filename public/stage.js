@@ -288,7 +288,7 @@ window.Stage3D=(()=>{
     for(const id in figs){const f=figs[id],alive=g.alive[id]!==false;
       if(!alive&&!f.dead){f.dead=true;if(!(fresh||still)){flash.position.set(f.g.position.x,1.6,f.g.position.z);flash.intensity=3}}
       const R=VR[g.roles[id]];
-      const rk=R&&(!alive||over)?(g.roles[id]==='C'&&g.antibody===id?'AB':g.roles[id])+(over?'':'~'):'';
+      const rk=R&&(!alive||over)?(over&&g.roles[id]==='C'&&g.antibody===id?'AB':g.roles[id])+(over?'':'~'):'';   // the antibody is only shown with the results
       if(rk!==f.artKey){if(f.art)f.g.remove(f.art);f.art=null;f.artKey=rk;
         if(rk){const pi=S.players.findIndex(q=>q.id===id);f.art=roleFigure(rk.replace('~',''),{ghost:!over,look:S.players[pi].look||A.LOOKS[pi%A.LOOKS.length][1]});f.g.add(f.art);f.pop=(fresh||still)?1:0;f.pivot.visible=false;f.gl.visible=false}else f.pivot.visible=true}
       if(R&&(!alive||over)&&!f.role){f.role=label(R.n,'#f1cf63',.055,{depth:false});f.role.position.y=2.34;f.role.center.set(.5,-.6);f.g.add(f.role)}

@@ -36,6 +36,7 @@ function connect(){
     else if(m.t==='seat'){if(Stage3D)Stage3D.seat(m.x,m.z,m.r);paintCtx()}
     else if(m.t==='act'){if(Stage3D)Stage3D.progress(m.a,m.ms)}
     else if(m.t==='env'){if(Stage3D)Stage3D.env(m);paintCtx()}
+    else if(m.t==='dbgab'){window.__ab=m.id}
     else if(m.t==='err'){toast(m.m);if(m.fatal){wantRoom=null;ls.del('ax_room');if(mode==='net'){S=null;mode=null}render()}}
     else if(m.t==='gone'){toast(m.m);Voice.disable();wantRoom=null;S=null;mode=null;me=null;ls.del('ax_room');render()}};
 }
@@ -94,7 +95,7 @@ const BR={
       ['antidote','解毒劑','你個人一次','任何一名存活玩家，包含自己','治好對方的感染。對沒被感染的人使用會浪費掉。用在自己身上不需要做動作。']],
     win:'至少一名恐怖分子存活，其餘玩家除了抗體保有者以外全部死亡。',score:['恐怖分子獲勝：每名恐怖分子 4 枚','沒有獲勝：0 枚']},
   C:{skills:[],win:'恐怖分子全部死亡，或研究員完成解毒劑。',score:['市民陣營獲勝：1 枚','結束時你還活著：再加 1 枚']},
-  R:{skills:[['research','製藥','每日一次',TGT,'對方是抗體保有者才算成功。全隊每日最多成功一次，累計兩次解毒劑完成，市民陣營立刻獲勝。']],
+  R:{skills:[['research','製藥','每日一次',TGT,'對方帶有抗體才算成功。帶有抗體的人自己也不知道，結果只有你看得到，要不要告訴對方由你決定。全隊每日最多成功一次，累計兩次解毒劑完成，市民陣營立刻獲勝。']],
     win:'恐怖分子全部死亡，或解毒劑完成。',score:['市民陣營獲勝：1 枚','結束時你還活著：再加 1 枚','因解毒劑完成而獲勝：再加 1 枚']},
   J:{skills:[['check','查驗身分','每日一次',TGT,'只有你會得知對方的角色。看不出對方有沒有抗體。']],
     win:'恐怖分子全部死亡，或研究員完成解毒劑。',score:['市民陣營獲勝：1 枚','結束時你還活著：再加 1 枚']},
@@ -115,7 +116,7 @@ function briefBody(){
     h+=`<h4>技能與目標</h4>`+(B.skills.length?B.skills.map(([k,n,lim,tg,ef])=>{const t=g3?vTask(S,me,k):null;
       return`<div class="sk"><b>${n}</b>（${lim}）<ul><li>目標：${tg}</li><li>效果：${ef}</li>${t?`<li>施放條件：${t[0]}</li>`:''}</ul></div>`}).join('')
       :`<p>你沒有主動技能。${g3?'你可以對任何人做動作，也可以使用長椅、書架、置物櫃、茶桌和電燈開關來試探或誤導別人，這些都不會發動任何技能。':''}</p>`);
-    if(g.antibody===me)h+=`<div class="sk"><b>抗體</b><ul><li>你會被感染，也會把病毒傳給下一個感染序號，但一日後自行痊癒，不會病死。</li><li>研究員要找到你才能製藥。恐怖分子獲勝時不需要你死亡。</li></ul></div>`;
+    if(role==='C')h+=`<div class="sk"><b>抗體</b><ul><li>一般市民之中有一位帶有抗體，但沒有人一開始知道是誰，連本人都不知道。可能就是你。</li><li>想知道只有一個辦法：找研究員合作，讓他對你製藥。結果只有研究員看得到，要由他告訴你，他說的不一定是真話。</li><li>帶有抗體的人會被感染，也會把病毒傳給下一個感染序號，但一日後自行痊癒，不會病死。恐怖分子獲勝時不需要他死亡。</li></ul></div>`;
     if(B.skills.length)h+=`<h4>施放操作</h4>`+(g3?`<ol><li>按下技能按鈕，選擇對象</li><li>條件是「走到對方旁邊」的動作：先走到他旁邊約兩步內再按，你的角色會做出動作，保持 3 秒不要移動</li><li>條件是使用建築物的動作：按下後技能進入準備狀態，再去指定的地方完成動作（坐下、選號碼、倒茶或關燈）</li><li>系統自動判定，達成就發動；沒達成技能不算用掉，可以重來</li></ol><p>別人只看得到你做了什麼動作，不會收到任何通知。倒放的書和置物櫃上的信號旗會留到當日結束。</p>`
       :`<ol><li>按下技能按鈕</li><li>選擇對象並確定，立刻發動</li></ol>`);
     h+=`<h4>你的號碼</h4><ul><li>座號 ${g.seat[me]} 號：公開，顯示在你的角色頭上。書本和置物櫃用座號對應玩家。</li><li>感染序號 ${g.num[me]} 號：只有你自己知道。病毒依感染序號的順序傳播。</li></ul>`;
@@ -138,7 +139,7 @@ function briefCard(){
     h+=`<section class="dossier shuffle"><span class="lbl">身分抽籤中</span><div class="role" id="shuf">？</div><p>每個人的身分都是隨機分配的，只有自己看得到。</p></section>`}
   else{let top;
     if(v){const R=VR[role],mates=S.opts.knowMates&&(role==='T'||role==='R')?vTeam(S,role).filter(id=>id!==me):[];
-      top=`<span class="stamp ${R.c}">${R.f}</span><span class="lbl">你抽到的身分</span><div class="role">${R.n}</div>${g.antibody===me?'<div><b>你同時是抗體保有者</b></div>':''}
+      top=`<span class="stamp ${R.c}">${R.f}</span><span class="lbl">你抽到的身分</span><div class="role">${R.n}</div>
         ${mates.length?`<div>同伴：<b>${mates.map(id=>esc(nm(S,id))).join('、')}</b></div>`:(role==='T'||role==='R')&&!S.opts.knowMates?'<div>你不知道誰是同伴，要自己找出來。</div>':''}`}
     else{const cor=all.filter(id=>g.roles[id]==='corrupt'),th=all.filter(id=>g.roles[id]==='thief'),mates=role==='thief'?[]:all.filter(id=>g.roles[id]!=='thief'&&g.team[id]===g.team[me]&&id!==me);
       const I={thief:['小偷','threat','小偷陣營'],cop:['警察','safe','警察陣營'],corrupt:['內鬼','neutral','與小偷同盟']}[role];
@@ -263,7 +264,7 @@ function rulesHtml(game){
     <li>每人拿到一個角色、一個公開的座號（顯示在角色頭上）和一個只有自己知道的感染序號。全程沒有投票，死亡只會來自子彈或病毒。</li>
     <li>共 ${o.rounds} 日。房主按「提早結束本日」時結算：病毒先傳給下一個感染序號的存活玩家（最大號接回最小號，跳過死者），再讓感染滿 ${o.deathDelay} 日的人死亡。</li>
     <li>每日結束公布感染人數、死亡人數（含槍擊）、解毒劑進度。死者公開姓名與角色，不公開感染序號和抗體。</li>
-    <li>抗體保有者是其中一位市民：會被感染也會傳染，一日後自行痊癒，不會病死。</li>
+    <li>抗體保有者是其中一位一般市民，但字卡上不會寫，連本人都不知道。他會被感染也會傳染，一日後自行痊癒，不會病死。市民要和研究員合作，讓研究員製藥才查得出抗體在誰身上；製藥結果只有研究員看得到。結算時才公布。</li>
     <li>獎勵（代幣）：恐怖分子勝各 4；市民方勝各 1、存活再 +1，研究員因解毒劑獲勝再 +1；搜查官在恐怖分子全滅時依達成日得 4/4/3/2/1；狂熱分子依死亡日得 3/2/2/1/0。</li>
     <li>連線對戰時，每個人在 3D 建築裡操控自己的角色：左下搖桿移動，拖曳畫面轉視角，右上角有小地圖。建築有兩個廳（圓桌廳、交誼廳）、六個房間（圖書室、置物間、茶水間、音樂室、儲藏室、醫務室）和連接它們的走廊。你只看得到、聽得到和你在同一個空間的人，走廊也算一個空間。</li>
     <li>遊戲進行時用橫向畫面：左下搖桿走動、拖曳畫面轉視角，右上是小地圖，上方的「身分／交談／紀錄／選單」按一下打開、再按一下收起。手機直立拿著時畫面會自動轉 90 度，把手機橫過來即可。</li>
@@ -296,7 +297,7 @@ function compHtml(){
   const n=S.players.length;
   if(S.game==='virus'){const c=vComp(Math.max(n,6));
     return [['T','threat'],['R','safe'],['J','safe'],['C','safe'],['I','neutral'],['F','neutral']].filter(([k])=>c[k]>0)
-      .map(([k,cl])=>`<span class="chip c-${cl}">${VR[k].n} <b>${c[k]}</b></span>`).join('')+`<span class="chip">抗體保有者 <b>1</b>（市民之一）</span>`}
+      .map(([k,cl])=>`<span class="chip c-${cl}">${VR[k].n} <b>${c[k]}</b></span>`).join('')+`<span class="chip">抗體保有者 <b>1</b>（一般市民之一，本人不知道）</span>`}
   const c=cComp(Math.max(n,5));
   return`<span class="chip c-threat">小偷 <b>${c.th}</b></span><span class="chip c-safe">警察 <b>${c.cops-c.cor}</b></span><span class="chip c-neutral">內鬼 <b>${c.cor}</b></span><span class="chip">警隊 <b>${c.teams}</b></span>`;
 }
@@ -430,9 +431,9 @@ function vIdHtml(){
     const tasks=g3?(VSK[role]||[]).map(k=>[k,vTask(S,me,k)]).filter(x=>x[1]):[];
     h+=ui.hide?`<div class="hidden-card">身分卡已蓋住 <button class="btn sm" data-a="hide">翻開</button></div>`:
     `<section class="dossier"><span class="stamp ${R.c}">${R.f}</span><span class="lbl">你的身分</span><div class="role">${R.n}</div>
-      <div class="num">座號 ${g.seat[me]}（公開）・感染序號 ${g.num[me]}（秘密）${g.antibody===me?'　・　你是抗體保有者':''}${g.alive[me]?'':'　・　已死亡'}</div>
+      <div class="num">座號 ${g.seat[me]}（公開）・感染序號 ${g.num[me]}（秘密）${g.alive[me]?'':'　・　已死亡'}</div>
       ${mates.length?`<div>同伴：<b>${mates.map(id=>esc(nm(S,id))).join('、')}</b></div>`:(role==='T'||role==='R')&&!S.opts.knowMates?'<div>你不知道誰是同伴，要自己找出來。</div>':''}
-      <ul>${R.d.map(d=>`<li>${d}</li>`).join('')}${g.antibody===me?'<li>抗體：你會被感染也會傳染，但一日後自行痊癒</li>':''}</ul>
+      <ul>${R.d.map(d=>`<li>${d}</li>`).join('')}</ul>
       ${tasks.length?`<div class="lbl">指定動作（只有你知道）</div><ul>${tasks.map(([k,t])=>`<li>${SKN[k]}：${t[0]}</li>`).join('')}</ul>`:''}
       <details class="fullbrief"><summary>完整身分說明</summary>${briefBody()}</details>
       <div><button class="btn sm" data-a="hide">蓋住</button></div></section>`;
