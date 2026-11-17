@@ -470,7 +470,10 @@ window.Stage3D=(()=>{
   api.dist=distTo;api.range=RANGE;
   api.speak=(id,v)=>{speak[id]=!!v;const f=figs[id];if(f)f.bub.visible=!!v&&!f.art};
   api.inRoom=()=>kind==='virus'&&me3.ok;
-  api.gesture=(gi,t,k,name)=>{if(kind!=='virus'||!figs[t])return'對象不在場';if(seated)return'請先站起來';if(distTo(t)>RANGE)return'太遠了，先走到他旁邊（約兩步內）';prog=null;gest={gi,t,k:k||'',name:name||'',t0:Date.now()};return''};
+  api.gesture=(gi,t,k,name)=>{if(kind!=='virus'||!figs[t])return'對象不在場';if(seated)return'請先站起來';if(distTo(t)>RANGE)return'太遠了，先走到他旁邊（約兩步內）';prog=null;gest={gi,t,k:k||'',name:name||'',t0:Date.now()};beat();return''};
+  // while an action is being held the server must keep hearing from us, even if this phone draws only a frame or two per second
+  function beat(){if(kind!=='virus'||!gest||!api.onPos||!me3.ok)return;lastSendT=Date.now();api.onPos({x:me3.x,z:me3.z,r:me3.r,gi:gest.gi,gt:gest.t,gk:gest.k})}
+  setInterval(()=>{if(gest&&el.isConnected&&Date.now()-lastSendT>550)beat()},600);
   api.stop=()=>stopGesture(true);
   api.busy=()=>!!gest;
   api.setYaw=y=>{camYaw=y};
