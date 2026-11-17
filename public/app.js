@@ -15,7 +15,7 @@ const myKey=(()=>{const k='ax_key_'+myId;let v=ls.get(k);if(!v){v=Array.from(cry
 
 /* ============ session ============ */
 let S=null,mode=null,me=null,online='checking',tOff=0,ws=null,wantRoom=null,retry=0;
-const ui={nick:(ls.get('ax_nick')||''),game:'virus',join:(qs.get('room')||'').toUpperCase().slice(0,4),add:'',cover:false,hide:false,pick:null,t:null,sel:null,confirmNext:false,net:'',msg:'',ch:'',seen:{},gpanel:null,gsel:[],gname:'',ft:null,fakeOpen:false,tab:'',tabKey:'',privSeen:{}};
+const ui={nick:(ls.get('ax_nick')||''),game:'virus',join:(qs.get('room')||'').toUpperCase().slice(0,4),add:'',cover:false,hide:false,pick:null,t:null,sel:null,confirmNext:false,net:'',msg:'',ch:'',seen:{},gpanel:null,gsel:[],gname:'',ft:null,fakeOpen:false,tab:'',tabKey:'',privSeen:{},roam:false};
 let dict=null,dictOn=false,composing=false,pendingRender=false;
 function isHost(){return mode==='local'||(mode==='net'&&S&&S.hostId===me)}
 function send(o){if(ws&&ws.readyState===1){ws.send(JSON.stringify(o));return true}return false}
@@ -259,14 +259,16 @@ function startLocal(resume){
 /* ============ views ============ */
 const inGame=()=>S&&S.players.some(p=>p.id===me);
 function rulesHtml(game){
-  const o=S?S.opts:{deathDelay:2,rounds:5,lootGoal:6,maxRounds:15};
+  const o=S?S.opts:{deathDelay:2,rounds:5,roundMin:12,lootGoal:6,maxRounds:15};
   if(game==='virus')return`<details><summary>感染戰規則</summary><ul>
     <li>每人拿到一個角色、一個公開的座號（顯示在角色頭上）和一個只有自己知道的感染序號。全程沒有投票，死亡只會來自子彈或病毒。</li>
     <li>共 ${o.rounds} 日。房主按「提早結束本日」時結算：病毒先傳給下一個感染序號的存活玩家（最大號接回最小號，跳過死者），再讓感染滿 ${o.deathDelay} 日的人死亡。</li>
+    <li>每日限時 ${o.roundMin} 分鐘（預設 12 分鐘），時間到自動結算。如果所有人手上已經沒有任何能改變結果的技能，系統會公布照規則走完的結果，並詢問存活玩家是否提前結束；存活玩家全數同意就直接結算，有人不同意則照常進行，隔天再問一次。</li>
     <li>每日結束公布感染人數、死亡人數（含槍擊）、解毒劑進度。死者公開姓名與角色，不公開感染序號和抗體。</li>
     <li>抗體保有者是其中一位一般市民，但字卡上不會寫，連本人都不知道。他會被感染也會傳染，一日後自行痊癒，不會病死。市民要和研究員合作，讓研究員製藥才查得出抗體在誰身上；製藥結果只有研究員看得到。結算時才公布。</li>
     <li>獎勵（代幣）：恐怖分子勝各 4；市民方勝各 1、存活再 +1，研究員因解毒劑獲勝再 +1；搜查官在恐怖分子全滅時依達成日得 4/4/3/2/1；狂熱分子依死亡日得 3/2/2/1/0。</li>
     <li>連線對戰時，每個人在 3D 建築裡操控自己的角色：左下搖桿移動，拖曳畫面轉視角，右上角有小地圖。建築有兩個廳（圓桌廳、交誼廳）、六個房間（圖書室、置物間、茶水間、音樂室、儲藏室、醫務室）和連接它們的走廊。你只看得到、聽得到和你在同一個空間的人，走廊也算一個空間。</li>
+    <li>遊戲結束後可以留在房間裡不限時聊天復盤（文字或語音），也能回到建築裡走動，所有人都以身分造型出現。留下的人全部同意「再來一局」，就會重新發身分直接開新局；隨時可以按「離開房間」。</li>
     <li>遊戲進行時用橫向畫面：左下搖桿走動、拖曳畫面轉視角，右上是小地圖，上方的「身分／交談／紀錄／選單」按一下打開、再按一下收起。手機直立拿著時畫面會自動轉 90 度，把手機橫過來即可。</li>
     <li>開局前可以在大廳選擇自己的造型（20 種，男女各 10），也可以微調髮型、髮色、膚色和服裝。座號照加入房間的順序編排。</li>
     <li>指定動作：每個技能開局會隨機配到一個只有你知道的動作，共 12 種。七種要走到對方旁邊做 3 秒：挽手臂、搭肩、比槍、遞東西、鞠躬、猜拳、拍背。五種要利用建築：和對方同坐交誼廳的長椅（每張 4 個座位）、到圖書室把對方座號的書倒過來、到置物間把信投進對方座號的置物櫃、對方在茶桌旁時為他倒茶、房間裡只有你和對方時關燈。系統自動判定，不需要任何人同意。</li>
@@ -281,6 +283,7 @@ function rulesHtml(game){
     <li>出局的人和結算時的所有人，角色會換成該身分的專屬造型。</li>
     <li>本版調整：感染者本人不會收到通知；指定動作是本版自己設計的。</li></ul></details>`;
   return`<details><summary>地鐵追捕規則</summary><ul>
+    <li>遊戲結束後可以留在房間裡不限時聊天復盤（文字或語音）。留下的人全部同意「再來一局」，就會重新發身分直接開新局；隨時可以按「離開房間」。</li>
     <li>遊戲進行時用橫向畫面：左邊是路線圖（可拖曳旋轉、點車站），右邊是行動面板；上方的「行動／交談／紀錄／選單」可切換或收起。手機直立拿著時畫面會自動轉 90 度。</li>
     <li>小偷身分公開，位置不公開。10 個站藏有贓物，只有小偷看得到；收集 ${o.lootGoal} 件小偷方獲勝。</li>
     <li>開局先隨機抽身分，接著有 60 秒的身分確認時間，時間到自動開始，房主也可以提早開始。</li>
@@ -350,7 +353,7 @@ function lobbyView(){
   ${h?`<section class="panel"><h3>設定</h3>
     <div class="row"><span class="sub">遊戲</span>${Object.entries(GAMES).map(([k,g])=>`<button class="btn sm ${S.game===k?'on':''}" data-a="setgame" data-v="${k}">${g.name}</button>`).join('')}</div>
     ${S.game==='virus'?`<div class="row"><span class="sub">感染後幾日死亡</span>${optBtn('deathDelay',1,'1')}${optBtn('deathDelay',2,'2')}</div>
-      <div class="row"><span class="sub">每日分鐘（時間到自動結算）</span>${[5,10,15,30].map(v=>optBtn('roundMin',v,v)).join('')}</div>
+      <div class="row"><span class="sub">每日分鐘（時間到自動結算）</span>${[5,10,12,15,30].map(v=>optBtn('roundMin',v,v)).join('')}</div>
       ${mode==='local'?'':`<div class="row"><span class="sub">技能怎麼發動</span>${optBtn('verify','3d','走過去做指定動作')}${optBtn('verify','none','直接按按鈕')}</div>`}
       <div class="row"><span class="sub">同陣營開局互相知道身分</span>${optBtn('knowMates',0,'不知道')}${optBtn('knowMates',1,'知道')}</div>`
     :`<div class="row"><span class="sub">小偷要收集幾件</span>${[5,6,7].map(v=>optBtn('lootGoal',v,v)).join('')}</div>`}
@@ -415,6 +418,21 @@ function fakeHtml(){
 }
 function hostCtl(inner){return isHost()?`<section class="panel"><h3>房主控制</h3>${inner}</section>`:''}
 
+// nothing anybody holds can change the result any more: the system asks the living whether to stop here
+function offerHtml(){
+  const g=S&&S.g,o=g&&S.phase==='play'&&S.game==='virus'?g.offer:null;if(!o||o.no)return'';
+  const alive=S.players.filter(p=>g.alive[p.id]),yes=alive.filter(p=>o.yes[p.id]).length,can=me&&g.alive[me],mine=can&&o.yes[me];
+  return`<div class="cx col offer"><span><b>結果已定：${o.title}</b>　已經沒有任何技能能改變結果。存活玩家全數同意就提前結束（${yes}/${alive.length} 同意）。</span>
+    ${can?(mine?'<span class="sub">你已同意，等其他存活玩家。</span>':`<div class="row"><button class="btn sm pri grow" data-a="settle" data-v="1">同意提前結束</button><button class="btn sm" data-a="settle" data-v="0">不同意</button></div>`):'<span class="sub">由存活玩家表決。</span>'}</div>`}
+// after the game: stay as long as you like; everybody still here agreeing deals a new game
+function afterHtml(){
+  const G=GAMES[S.game],n=S.players.length,ag=S.again||{},yes=S.players.filter(p=>ag[p.id]),wait=S.players.filter(p=>!ag[p.id]),mine=!!ag[me],v=S.game==='virus'&&mode==='net'&&Stage3D;
+  return`<section class="panel after"><h3>賽後復盤</h3>
+    <p class="sub">不限時，可以留下來用文字或語音聊天（現在所有人都聽得到）${v?'，也可以回到建築裡走走':''}。留下的人全部同意就會重新發身分、直接開新的一局。</p>
+    ${inGame()?`<button class="btn ${mine?'on':'pri'} wide" data-a="rematch">${mine?'已同意再來一局（按一下取消）':'同意再來一局'}</button>`:''}
+    <p class="sub">已同意 <b>${yes.length}</b> / ${n} 人${wait.length&&yes.length?'，還在等：'+wait.map(p=>esc(p.name)).join('、'):''}。${n<G.min?`目前只剩 ${n} 人，${G.name}至少要 ${G.min} 人，請回大廳找人。`:''}</p>
+    <div class="row">${v?`<button class="btn grow" data-a="roam">${ui.roam?'看全員列隊':'回到建築裡走走'}</button>`:''}<button class="btn grow" data-a="leave">離開房間</button></div>
+    ${isHost()?`<button class="btn wide" data-a="again">回大廳（換人或改設定）</button>`:''}</section>`}
 function vStripHtml(){
   const g=S.g,alive=S.players.filter(p=>g.alive[p.id]);
   const end=g.round>=1?g.roundStart+S.opts.roundMin*60000:0;
@@ -422,7 +440,7 @@ function vStripHtml(){
     <div><div class="k">剩餘時間</div><div class="v" id="clock" data-end="${end}">–</div></div>
     <div><div class="k">存活</div><div class="v">${alive.length}</div></div>
     <div><div class="k">解毒劑</div><div class="v">${g.stats.cure}/2</div></div></div>
-    <p class="sub">前一日結算：感染 ${g.stats.inf} 人，死亡 ${g.stats.dead} 人。${g.round===0?'現在是自由活動時間，可以先走動、聊天、練習動作。':''}</p>`}
+    <p class="sub">前一日結算：感染 ${g.stats.inf} 人，死亡 ${g.stats.dead} 人。${g.round===0?'現在是自由活動時間，可以先走動、聊天、練習動作。':''}</p>${gsOn()?'':offerHtml()}`}
 function vIdHtml(){
   const g=S.g,all=S.players.map(p=>p.id),role=g.roles[me]&&g.roles[me]!=='?'?g.roles[me]:null,alive=all.filter(id=>g.alive[id]),g3=S.opts.verify==='3d'&&mode==='net';
   let h='';
@@ -530,7 +548,7 @@ function overParts(){
     again:isHost()?`<button class="btn pri wide" data-a="again">同一批人再來一局</button>`:'',
     log:`<section class="panel"><h3>公開紀錄</h3><div class="log">${S.pub.slice().reverse().map(l=>`<div><span class="r">${S.game==='virus'?'D':'R'}${l.r}</span><span>${esc(l.t)}</span></div>`).join('')}</div></section>`};
 }
-function overView(){const o=overParts();return topBar()+o.banner+stageSlot()+o.table+o.again+o.log}
+function overView(){const o=overParts();return topBar()+o.banner+stageSlot()+(mode==='net'?afterHtml():'')+o.table+(mode==='net'?'':o.again)+o.log}
 function coverView(){
   const g=S.g,need=S.phase!=='play'?[]:S.game==='chase'?cActive(S).filter(id=>!g.done[id]):[];
   return topBarLite()+`<section class="panel cover"><h2>把裝置交給下一位</h2><p class="sub">點自己的名字才會顯示身分。別人拿著的時候請不要偷看。</p>
@@ -545,10 +563,10 @@ function topBarLite(){return hudHtml()+`<div class="row between"><div><h2>${GAME
 const coarse=!!(window.matchMedia&&matchMedia('(pointer:coarse)').matches),rootEl=document.getElementById('root');
 const gsOn=()=>!!(mode==='net'&&S&&S.g&&(S.phase==='play'||S.phase==='over'));
 function gsTabs(){
-  if(S.phase==='over')return[['res','結果'],['log','紀錄'],['menu','選單']];
+  if(S.phase==='over')return[['res','結果'],['chat','交談'],['log','紀錄'],['menu','選單']];
   if(isBrief())return[['id','身分'],['menu','選單']];
   return S.game==='virus'?[['id','身分'],['chat','交談'],['log','紀錄'],['menu','選單']]:[['act','行動'],['chat','交談'],['log','紀錄'],['menu','選單']]}
-function gsDefault(){const k=S.gid+'|'+S.phase+'|'+(isBrief()?'b':'p');if(ui.tabKey===k)return;ui.tabKey=k;ui.tab=S.phase==='over'?'res':isBrief()?'id':S.game==='chase'?'act':''}
+function gsDefault(){const k=S.gid+'|'+S.phase+'|'+(isBrief()?'b':'p');if(ui.tabKey===k)return;ui.tabKey=k;ui.roam=false;ui.tab=S.phase==='over'?'res':isBrief()?'id':S.game==='chase'?'act':''}
 function chatUnread(){
   if(!inGame())return 0;const c=S.game==='chase'&&S.g,th=c&&S.g.roles[me]==='thief',tk=c?(th?'#th':'#t'+S.g.team[me]):'';let n=0;
   for(const m of S.chat||[]){if(m.f===me)continue;const ch=!m.to?'':m.to===tk?'#team':String(m.to).startsWith('#g')?m.to:m.to===me?m.f:null;if(ch!=null&&m.i>(ui.seen[me+'|'+ch]||0))n++}
@@ -575,7 +593,7 @@ function menuHtml(){
     ${rulesHtml(S.game)}`}
 function gsSide(){
   const t=ui.tab,v=S.game==='virus';if(!t)return'';let h='';
-  if(t==='res'){const o=overParts();h=o.banner+o.table+o.again}
+  if(t==='res'){const o=overParts();h=o.banner+afterHtml()+o.table}
   else if(t==='id')h=isBrief()?briefCard()+`<p class="note">不要讓別人看到你的畫面。時間到會自動開始。</p>`+briefHost():vIdHtml();
   else if(t==='act')h=cWaitHtml()+cIdHtml()+cLegendHtml();
   else if(t==='chat')h=chatHtml()||'<p class="note">觀眾不能發言。</p>';
@@ -589,7 +607,7 @@ function gsView(){
 // what sits on top of the scene: the narrator's caption and the skill that is waiting for its action
 function stageHud(){
   if(!gsOn())return'';const a=ui.armed,t=a&&S.game==='virus'&&S.phase==='play'?armedTask():null;
-  return`<div class="hudcap" id="hudcap" aria-live="polite">${esc(Narr.caption())}</div>${t?`<div class="cx armedx"><span>已準備「${SKN[a.k]}」→ ${esc(sn(a.t))}：${t[0]}</span><button class="btn sm" data-a="disarm">取消</button></div>`:''}`}
+  return`<div class="hudcap" id="hudcap" aria-live="polite">${esc(Narr.caption())}</div>${offerHtml()}${S.phase==='over'&&ui.roam?'<div class="cx"><span>賽後自由走動中</span><button class="btn sm" data-a="roam">看全員列隊</button></div>':''}${t?`<div class="cx armedx"><span>已準備「${SKN[a.k]}」→ ${esc(sn(a.t))}：${t[0]}</span><button class="btn sm" data-a="disarm">取消</button></div>`:''}`}
 // the phone is held upright: turn the whole game a quarter so it reads right once the phone is on its side
 const portrait=()=>{const so=screen.orientation;if(so&&so.type)return so.type.startsWith('portrait');if(typeof window.orientation==='number')return window.orientation%180===0;return innerHeight>innerWidth};
 function layout(){
@@ -630,6 +648,7 @@ function render(){
   const game=gsOn(),was=document.body.classList.contains('game');document.body.classList.toggle('game',game);if(was&&!game)unlock();layout();
   if(Stage3D)Stage3D.fill=game;
   ui._acts=[];app.innerHTML=view();
+  if(Stage3D)Stage3D.roam=!!(game&&S.phase==='over'&&S.game==='virus'&&ui.roam);
   const nsd=document.getElementById('side');if(nsd&&nsd.dataset.tab===sdTab)nsd.scrollTop=sdTop;
   const slot=document.getElementById('stage-slot');
   if(Stage3D)Stage3D.walk=mode==='net'&&!isBrief();
@@ -659,6 +678,9 @@ app.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(!el||e
 const H={
   pickgame(v){ui.game=v;render()},
   tab(v){ui.tab=ui.tab===v?'':v;render()},
+  settle(v){go({k:'settle',v:v==='1'});if(mode==='net')render()},
+  rematch(){go({k:'rematch',v:!(S.again||{})[me]})},
+  roam(){ui.roam=!ui.roam;if(ui.roam)ui.tab='';else ui.tab='res';render()},
   create(){createRoom()},join(){joinRoom(ui.join)},rejoin(v){joinRoom(v)},
   local(){startLocal(false)},localresume(){startLocal(true)},
   leave(){leave()},

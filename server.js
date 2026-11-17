@@ -66,6 +66,10 @@ function mayTalk(R,a,b){const S=R.S,inList=id=>S.players.some(p=>p.id===id);if(!
   if(S.phase==='play'&&S.game==='chase'){const g=S.g,ch=id=>g.roles[id]==='thief'?'th':'t'+g.team[id];return ch(a)===ch(b)}
   return true}
 /* ---- rooms ---- */
+// someone left the after-game room: drop them, and if everybody still here had agreed, the next game starts
+function afterQuit(R,pid){const S=R.S;E.act(S,pid,{k:'quit'});if(R.pos)delete R.pos[pid];if(R.away)delete R.away[pid];
+  if(S.phase==='play'&&S.game==='virus'){spawn(R);pushState(R);for(const [id,k] of R.cl){k.vroom=viewRoom(R,id);k.vphase=S.phase;sendAllPos(R,k,1)}}else pushState(R)}
+const AWAY_MS=process.env.AWAY_SECONDS?+process.env.AWAY_SECONDS*1000:90000;   // after the game, a player gone this long (tab closed) stops holding up the rematch
 const rooms=new Map();
 const clean=s=>String(s||'').replace(/[\u0000-\u001f]/g,'').trim().slice(0,12);
 function spawn(R){const ids=R.S.players.map(p=>p.id),n=ids.length,now=Date.now();R.pos={};
@@ -112,19 +116,24 @@ function onMsg(c,m){
   const R=c.room;if(!R||!c.pid)return;const S=R.S,pid=c.pid;
   if(m.t==='voice'){if(!S.players.some(p=>p.id===pid))return;if(m.on)R.voice.add(pid);else R.voice.delete(pid);voiceList(R);return}
   if(m.t==='rtc'){const to=String(m.to||''),k=R.cl.get(to);if(k&&R.voice.has(pid)&&R.voice.has(to)&&mayTalk(R,pid,to))wsSend(k.sock,{t:'rtc',from:pid,d:m.d});return}
-  if(m.t==='leave'){R.cl.delete(pid);voiceOff(R,pid);c.room=null;if(S.phase==='lobby'&&pid!==S.hostId){S.players=S.players.filter(p=>p.id!==pid);pushState(R)}return}
+  if(m.t==='leave'){R.cl.delete(pid);voiceOff(R,pid);c.room=null;
+    if(S.phase==='lobby'&&pid!==S.hostId){S.players=S.players.filter(p=>p.id!==pid);pushState(R)}
+    else if(S.phase==='over')afterQuit(R,pid);
+    return}
   if(m.t==='act'){
     const a=m.a||{},host=!!m.host&&pid===S.hostId;
     if(a.k==='add'){wsSend(c.sock,{t:'err',m:'連線模式不能手動加人'});return}
     const was=S.phase,e=E.act(S,pid,a,host);
     if(e){wsSend(c.sock,{t:'err',m:e});return}
     if(a.k==='kick'){const k=R.cl.get(a.t);if(k){wsSend(k.sock,{t:'gone',m:'你被房主移出房間'});R.cl.delete(a.t);k.room=null}voiceOff(R,a.t)}
-    if(was==='lobby'&&S.phase==='play'&&S.game==='virus'){spawn(R);pushState(R);for(const [id,k] of R.cl){k.vroom=viewRoom(R,id);k.vphase=S.phase;sendAllPos(R,k,1)}return}
+    if(was!=='play'&&S.phase==='play'&&S.game==='virus'){spawn(R);pushState(R);for(const [id,k] of R.cl){k.vroom=viewRoom(R,id);k.vphase=S.phase;sendAllPos(R,k,1)}return}
     pushState(R);return}
   if(process.env.TEST_HOOKS&&m.t==='dbg'&&m.ab&&S.g){wsSend(c.sock,{t:'dbgab',id:S.g.antibody||''});return}                      // tests only: who carries the antibody
   if(process.env.TEST_HOOKS&&m.t==='dbg'&&S.g&&S.g.task&&S.g.task[pid]){S.g.task[pid][m.k]=m.gi;pushState(R);return}   // tests only: choose my own secret condition
   if(m.t==='pos'){
-    const q=R.pos[pid];if(!q||S.phase!=='play'||S.game!=='virus'||!S.g.alive[pid])return;
+    const q=R.pos[pid];if(!q||S.game!=='virus'||!S.g)return;
+    if(S.phase==='over'){const x=+m.x,z=+m.z;if(isFinite(x)&&isFinite(z)&&E.walkable(x,z,.3)){q.x=x;q.z=z;q.r=isFinite(+m.r)?+m.r:q.r;q.gi=-1;q.seat=null;q.act=null;R.dirty.add(pid);R.last=Date.now()}return}
+    if(S.phase!=='play'||!S.g.alive[pid])return;
     const now=Date.now();q.seen=now;R.last=now;
     const x=+m.x,z=+m.z;if(!isFinite(x)||!isFinite(z)||S.g.briefEnd)return;          // nobody moves during the identity briefing
     if(q.seat){if(now-q.seat.arm<800||Math.hypot(x-q.x,z-q.z)<.3)return;q.seat=null;q.gi=-1;q.gk='';q.tg=''}   // walking away from the bench = standing up (positions sent just before sitting down are ignored)
@@ -165,6 +174,9 @@ setInterval(()=>{
     const S=R.S;
     if(now-R.last>3*3600e3){rooms.delete(code);continue}
     if(S.phase==='play'&&S.g&&S.g.briefEnd&&now>=S.g.briefEnd){E.briefDone(S);pushState(R)}
+    if(S.phase==='over'){R.away=R.away||{};
+      for(const p of S.players.slice()){if(R.cl.has(p.id)){delete R.away[p.id];continue}R.away[p.id]=R.away[p.id]||now;if(now-R.away[p.id]>AWAY_MS){afterQuit(R,p.id);if(S.phase!=='over')break}}}
+    else if(R.away)R.away=null;
     if(S.phase==='play'&&S.game==='virus'&&R.env){
       let changed=false;const g=S.g;
       for(const pid in R.pos){const q=R.pos[pid],live=!!g.alive[pid]&&R.cl.has(pid)&&now-(q.seen||0)<=2500;
@@ -200,6 +212,7 @@ setInterval(()=>{
       for(const r in R.env.dark)if(now>=R.env.dark[r])delete R.env.dark[r];
     }
     if(S.game==='virus'&&S.g&&R.env&&S.phase!=='lobby'){
+      if(S.phase==='over'&&Object.keys(R.env.dark).length)R.env.dark={};                              // lights back on for the after-game walk
       for(const [pid,c] of R.cl){const vr=viewRoom(R,pid);
         if(c.vroom!==vr||c.vphase!==S.phase){c.vroom=vr;c.vphase=S.phase;sendAllPos(R,c,0)}           // entered another room: what is visible changes
         else if(R.dirty.size)wsSend(c.sock,{t:'pos',p:posFor(R,pid,R.dirty)});

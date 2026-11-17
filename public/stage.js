@@ -185,7 +185,8 @@ window.Stage3D=(()=>{
       L.done();g.add(G);return G});
     return{g,arms,legs};
   }
-  function roleFigure(key,opt){const o=opt||{};return human(o.look||A.LOOKS[key==='thief'?2:0][1],null,{role:key,ghost:o.ghost,color:o.color}).g}
+  function roleHuman(key,opt){const o=opt||{};return human(o.look||A.LOOKS[key==='thief'?2:0][1],null,{role:key,ghost:o.ghost,color:o.color})}
+  function roleFigure(key,opt){return roleHuman(key,opt).g}
   let thR=null,thS=null,thC=null;
   api.palette=PAL;
   api.thumb=(look,w,h,role)=>{try{                                   // a small portrait of a look, as an image
@@ -290,12 +291,12 @@ window.Stage3D=(()=>{
       const R=VR[g.roles[id]];
       const rk=R&&(!alive||over)?(over&&g.roles[id]==='C'&&g.antibody===id?'AB':g.roles[id])+(over?'':'~'):'';   // the antibody is only shown with the results
       if(rk!==f.artKey){if(f.art)f.g.remove(f.art);f.art=null;f.artKey=rk;
-        if(rk){const pi=S.players.findIndex(q=>q.id===id);f.art=roleFigure(rk.replace('~',''),{ghost:!over,look:S.players[pi].look||A.LOOKS[pi%A.LOOKS.length][1]});f.g.add(f.art);f.pop=(fresh||still)?1:0;f.pivot.visible=false;f.gl.visible=false}else f.pivot.visible=true}
+        if(rk){const pi=S.players.findIndex(q=>q.id===id);f.artH=roleHuman(rk.replace('~',''),{ghost:!over,look:S.players[pi].look||A.LOOKS[pi%A.LOOKS.length][1]});f.art=f.artH.g;f.g.add(f.art);f.pop=(fresh||still)?1:0;f.pivot.visible=false;f.gl.visible=false}else f.pivot.visible=true}
       if(R&&(!alive||over)&&!f.role){f.role=label(R.n,'#f1cf63',.055,{depth:false});f.role.position.y=2.34;f.role.center.set(.5,-.6);f.g.add(f.role)}
       const tgt=id!==me&&(ui.t===id&&ui.pick||ui.ft===id);f.ring.visible=tgt||(id===me&&(alive||over));f.bub.visible=!!speak[id]&&!f.art;f.ring.material.color.setHex(tgt?0xe2594c:0xe8a33d);
     }
-    const mine=figs[me]&&g.alive[me]!==false&&S.phase==='play';
-    const walk=mine&&api.walk;stick.hidden=!walk;mini.hidden=over;ctx.hidden=!walk;if(!walk)tip.textContent='拖曳畫面轉視角';
+    const roam=over&&api.roam,mine=figs[me]&&(roam||(g.alive[me]!==false&&S.phase==='play'));
+    const walk=mine&&api.walk;stick.hidden=!walk;mini.hidden=over&&!roam;ctx.hidden=!walk||over;if(!walk)tip.textContent='拖曳畫面轉視角';
     if(!mine){if(gest)stopGesture(true);seated=false;prog=null}
     applyEnv();
   }
@@ -316,7 +317,7 @@ window.Stage3D=(()=>{
     const sw=M.switches[room];if(sw&&d(sw)<=1.9)o.push({t:'switch',room,dark:env.dark.includes(room)});
     return o}
   function stepRoom(dt,t){
-    const S=cur.S,me=cur.me,g=S.g,play=S.phase==='play',mine=synced&&api.walk!==false&&figs[me]&&play&&g.alive[me]!==false,now=Date.now();
+    const S=cur.S,me=cur.me,g=S.g,play=S.phase==='play',mine=synced&&api.walk!==false&&figs[me]&&((play&&g.alive[me]!==false)||(S.phase==='over'&&api.roam)),now=Date.now();
     if(mine){
       let jx=joy.x,jy=joy.y;if(keys.w||keys.arrowup)jy+=1;if(keys.s||keys.arrowdown)jy-=1;if(keys.a||keys.arrowleft)jx-=1;if(keys.d||keys.arrowright)jx+=1;
       const m=Math.hypot(jx,jy);
@@ -341,17 +342,20 @@ window.Stage3D=(()=>{
         const room=A.roomOf(me3.x,me3.z),rn=(M.rooms.find(r=>r.id===room)||{}).n||'';if(!gest&&!prog)tip.textContent=rn?'你在'+rn:'';
         const c=mini.querySelector('circle');if(c){c.setAttribute('cx',me3.x.toFixed(1));c.setAttribute('cy',me3.z.toFixed(1));mini.querySelectorAll('rect').forEach(e=>e.classList.toggle('on',e.dataset.r===room))}}
     }
-    const over=S.phase==='over',ids=Object.keys(figs);if(over!==wasOver){wasOver=over;if(over)camYaw=Math.PI}
+    const over=S.phase==='over'&&!api.roam,ids=Object.keys(figs);if(over!==wasOver){wasOver=over;camYaw=over?Math.PI:me3.r}      // over = the line-up; walking around after the game is not
     for(const id in figs){const f=figs[id],p=peers[id];if(!p)continue;const self=id===me&&mine,vis=over||!p.hidden||id===me;
       if(f.shown!==vis){f.shown=vis;f.g.visible=vis}if(!vis)continue;
-      if(over){const L=lineSpot(ids.indexOf(id),ids.length);f.g.position.set(L.x,L.y,L.z);f.g.rotation.y=0;f.gl.visible=false;
-        if(!f.lined){f.lined=true;f.name.visible=true;f.name.material.sizeAttenuation=true;f.name.material.needsUpdate=true;f.name.scale.set(1.89,.27,1);f.name.position.y=2.27;        // labels become part of the scene so they shrink with the figures
-          if(f.role){f.role.material.sizeAttenuation=true;f.role.material.depthTest=true;f.role.material.needsUpdate=true;f.role.scale.set(1.36,.34,1);f.role.center.set(.5,.5);f.role.position.y=2.6}
-          f.step=new T.Mesh(G.box,mat(0x2f4350));f.step.scale.set(7.6,.5,5);f.step.position.y=-.045;f.g.add(f.step)}}
+      if(!!f.lined!==over){f.lined=over;const nm=f.name,rl=f.role;nm.visible=true;nm.material.sizeAttenuation=over;nm.material.needsUpdate=true;        // in the line-up labels are part of the scene so they shrink with the figures
+        if(over){nm.scale.set(1.89,.27,1);nm.position.y=2.27}else{nm.scale.set(.42,.06,1);nm.position.y=2.34}
+        if(rl){rl.material.sizeAttenuation=over;rl.material.depthTest=over;rl.material.needsUpdate=true;if(over){rl.scale.set(1.36,.34,1);rl.center.set(.5,.5);rl.position.y=2.6}else{rl.scale.set(.22,.055,1);rl.center.set(.5,-.6);rl.position.y=2.34}}
+        if(!f.step){f.step=new T.Mesh(G.box,mat(0x2f4350));f.step.scale.set(7.6,.5,5);f.step.position.y=-.045;f.g.add(f.step)}f.step.visible=over;if(!over){f.g.position.set(p.x,0,p.z);f.g.rotation.y=p.r}}
+      if(over){const L=lineSpot(ids.indexOf(id),ids.length);f.g.position.set(L.x,L.y,L.z);f.g.rotation.y=0;f.gl.visible=false}
       else if(self){f.g.position.set(p.x,0,p.z);f.g.rotation.y=p.r}
       else{f.g.position.x+=(p.x-f.g.position.x)*.22;f.g.position.z+=(p.z-f.g.position.z)*.22;
         let dr=p.r-f.g.rotation.y;dr=Math.atan2(Math.sin(dr),Math.cos(dr));f.g.rotation.y+=dr*.25}
-      if(f.art){f.pop=Math.min(1,(f.pop||0)+.05);const e=1-Math.pow(1-f.pop,3);f.art.scale.setScalar(.55+.45*e);if(!still&&cur.S.phase==='over')f.art.position.y=Math.abs(Math.sin(t/500+f.sp.r*2))*.05;continue}
+      if(f.art){f.pop=Math.min(1,(f.pop||0)+.05);const e=1-Math.pow(1-f.pop,3);f.art.scale.setScalar(.55+.45*e);f.art.position.y=!still&&over?Math.abs(Math.sin(t/500+f.sp.r*2))*.05:0;
+        const mv=Math.hypot(f.g.position.x-f.lx,f.g.position.z-f.lz);f.lx=f.g.position.x;f.lz=f.g.position.z;f.walk+=mv*4.2;const sw=!over&&mv>.002&&!still?Math.sin(f.walk)*.55:0,lg=f.artH&&f.artH.legs;   // identity figures walk too
+        if(lg){lg[0].rotation.x+=(sw-lg[0].rotation.x)*.3;lg[1].rotation.x+=(-sw-lg[1].rotation.x)*.3}continue}
       const gi=p.gi,dk=env.dark.length&&env.dark.includes(A.roomOf(f.g.position.x,f.g.position.z));
       if(gi!==f.gi){f.gi=gi;for(const k in f.props)f.props[k].visible=gi>=0&&GL[gi][2]===k;if(gi>=0){f.gl.material.map=texOf(GN[gi],'#ffe9a8');f.gl.material.needsUpdate=true}}
       f.gl.visible=gi>=0&&!dk;f.name.visible=!dk;                          // in a dark room nobody can read what you are doing
@@ -369,6 +373,7 @@ window.Stage3D=(()=>{
     let D=4.6;                                   // pull the camera in when a wall or a piece of furniture is in the way
     for(let d=.5;d<=4.6;d+=.2){const x=cx-sx*d,z=cz-sz*d;if(!A.walkable(x,z,.22)||A.blocked(x,z)&&Math.hypot(x-M.table.x,z-M.table.z)>M.table.r+.4){D=Math.max(.8,d-.3);break}}
     camD+=(D-camD)*(D<camD?.5:.12);
+    if(!over)lamp.position.set(M.table.x,3.2,M.table.z);
     if(over){const L=lineSpot(0,ids.length),hw=L.cols*.65,top=L.rows*2.95,th=Math.tan(cam.fov/2*Math.PI/180),D=Math.max(hw/(th*cam.aspect),top/2/th)*1.03+.5,a=camYaw-Math.PI;   // results: the line-up, seen from the front; drag to walk around it
       lamp.position.set(0,5,PZ+3);cam.position.set(Math.sin(a)*D,top/2-.12,PZ+Math.cos(a)*D);cam.lookAt(0,top/2-.12,PZ)}
     else{cam.position.set(cx-sx*camD,1.9+camD/4.6*1.1+(4.6-camD)*.3,cz-sz*camD);cam.lookAt(cx,1.25+(4.6-camD)*.08,cz)}
@@ -472,8 +477,9 @@ window.Stage3D=(()=>{
   api.inRoom=()=>kind==='virus'&&me3.ok;
   api.gesture=(gi,t,k,name)=>{if(kind!=='virus'||!figs[t])return'對象不在場';if(seated)return'請先站起來';if(distTo(t)>RANGE)return'太遠了，先走到他旁邊（約兩步內）';prog=null;gest={gi,t,k:k||'',name:name||'',t0:Date.now()};beat();return''};
   // while an action is being held the server must keep hearing from us, even if this phone draws only a frame or two per second
-  function beat(){if(kind!=='virus'||!gest||!api.onPos||!me3.ok)return;lastSendT=Date.now();api.onPos({x:me3.x,z:me3.z,r:me3.r,gi:gest.gi,gt:gest.t,gk:gest.k})}
-  setInterval(()=>{if(gest&&el.isConnected&&Date.now()-lastSendT>550)beat()},600);
+  // (a gesture, sitting on a bench, or using the shelf, lockers, tea table or a light switch)
+  function beat(){if(kind!=='virus'||!(gest||seated||prog)||!api.onPos||!me3.ok)return;lastSendT=Date.now();api.onPos({x:me3.x,z:me3.z,r:me3.r,gi:gest?gest.gi:-1,gt:gest?gest.t:'',gk:gest?gest.k:''})}
+  setInterval(()=>{if((gest||seated||prog)&&el.isConnected&&Date.now()-lastSendT>550)beat()},600);
   api.stop=()=>stopGesture(true);
   api.busy=()=>!!gest;
   api.setYaw=y=>{camYaw=y};
@@ -486,7 +492,7 @@ window.Stage3D=(()=>{
   api.room=()=>me3.ok?A.roomOf(me3.x,me3.z):'';
   api.roomOf=id=>{const p=peers[id];return p&&!p.hidden?A.roomOf(p.x,p.z):''};
   api.setCtx=h=>{if(ctx._h!==h){ctx._h=h;ctx.innerHTML=h}};
-  api.setHud=h=>{hud.innerHTML=h};api.resize=()=>size();api.fill=false;api.rot=false;
+  api.setHud=h=>{hud.innerHTML=h};api.resize=()=>size();api.fill=false;api.rot=false;api.roam=false;
   api.refreshNear=()=>{nearKey=''};
   api.screenOf=id=>{const f=figs[id];if(!f)return null;const v=new T.Vector3(f.g.position.x,1,f.g.position.z).project(cam),r=cv.getBoundingClientRect(),lx=(v.x+1)/2,ly=(1-v.y)/2;return api.rot?[r.right-ly*r.width,r.top+lx*r.height]:[r.left+lx*r.width,r.top+ly*r.height]};   // where a player is on the screen (for tests)
   api.stand=()=>{seated=false;nearKey=''};

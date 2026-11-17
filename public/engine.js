@@ -10,11 +10,16 @@ const GAMES={
   chase:{name:'地鐵追捕',min:5,max:14,ds:'小偷在路線圖上隱藏移動收集贓物，三隊警察調查與逮捕，隊裡藏著內鬼。'}
 };
 function newState(game,hostId,code){return{v:1,code,game,hostId,phase:'lobby',players:[],kicked:{},
-  opts:{deathDelay:2,rounds:5,roundMin:30,lootGoal:6,maxRounds:15,verify:'3d',knowMates:0,briefSec:60},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
+  opts:{deathDelay:2,rounds:5,roundMin:12,lootGoal:6,maxRounds:15,verify:'3d',knowMates:0,briefSec:60},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
 const nm=(S,id)=>{const p=S.players.find(p=>p.id===id);return p?p.name:'？'};
 function pub(S,t){S.pubN=(S.pubN||0)+1;S.pub.push({r:S.g?S.g.round:0,t});if(S.pub.length>150)S.pub.shift()}
 function note(S,id,t){(S.priv[id]=S.priv[id]||[]).push({r:S.g.round,t})}
 
+function begin(S){S.pub=[];S.priv={};S.chat=[];S.groups=[];S.result=null;S.again={};S.phase='play';S.gid=Math.random().toString(36).slice(2,8);
+  if(S.game==='virus')vDeal(S);else cDeal(S)}
+// after a game: everybody who is still here agrees -> deal again at once. Returns true when a new game started.
+function rematch(S){const G=GAMES[S.game],n=S.players.length;if(S.phase!=='over'||n<G.min||n>G.max)return false;
+  if(!S.players.every(p=>(S.again||{})[p.id]))return false;begin(S);return true}
 function act(S,pid,a,isHost){
   if(a.k==='say'){
     const t=String(a.text||'').trim().slice(0,200),v=S.phase==='play'&&S.game==='virus';
@@ -36,20 +41,28 @@ function act(S,pid,a,isHost){
     const G=S.groups.find(x=>x.id===a.g);if(!G||!G.m.includes(pid))return'你不在這個群組';
     if(a.k==='grpinv'){(a.m||[]).filter(valid).forEach(id=>{if(!G.m.includes(id))G.m.push(id)});return}
     G.m=G.m.filter(id=>id!==pid);if(G.m.length<2)S.groups=S.groups.filter(x=>x!==G);return}
+  if(a.k==='rematch'){if(S.phase!=='over')return'遊戲還沒結束';if(!S.players.some(p=>p.id===pid))return'你不在名單內';
+    S.again=S.again||{};if(a.v)S.again[pid]=1;else delete S.again[pid];rematch(S);return}
+  if(a.k==='quit'){if(S.phase!=='over')return'現在不能這樣離開';if(!S.players.some(p=>p.id===pid))return;          // leaving the after-game room frees the others to start again
+    S.players=S.players.filter(p=>p.id!==pid);if(S.again)delete S.again[pid];if(S.hostId===pid&&S.players.length)S.hostId=S.players[0].id;rematch(S);return}
+  if(a.k==='settle'){const g=S.g;if(S.phase!=='play'||S.game!=='virus'||!g||!g.offer||g.offer.no)return'現在沒有提前結束的詢問';
+    if(!g.alive[pid])return'只有存活玩家可以表決';
+    if(!a.v){g.offer.no=true;pub(S,'有人不同意提前結束，遊戲照常進行。');return}
+    g.offer.yes[pid]=1;if(S.players.every(p=>!g.alive[p.id]||g.offer.yes[p.id])){pub(S,'存活玩家全數同意，提前結束。');S.sim=true;let n=0;while(S.phase==='play'&&n++<20)vNext(S);delete S.sim}
+    return}
   if(a.k==='look'){if(S.phase!=='lobby')return'遊戲開始後不能換造型';const p=S.players.find(p=>p.id===pid);if(!p)return'你不在名單內';if(!okLook(a.look))return'造型資料不正確';p.look=a.look.slice();return}
   if(['opt','game','start','next','again','kick','add'].includes(a.k)){
     if(!isHost)return'只有房主可以操作';
     if(a.k==='next'){if(S.phase!=='play')return'遊戲未在進行';if(S.game==='chase'&&S.g.briefEnd)return briefDone(S);return S.game==='virus'?vNext(S):cAdvance(S,true)}
-    if(a.k==='again'){S.phase='lobby';S.g=null;S.result=null;S.pub=[];S.priv={};S.chat=[];S.groups=[];return}
+    if(a.k==='again'){S.phase='lobby';S.g=null;S.result=null;S.again={};S.pub=[];S.priv={};S.chat=[];S.groups=[];return}
     if(S.phase!=='lobby')return'遊戲已開始';
-    if(a.k==='opt'){const ok={deathDelay:[1,2],roundMin:[5,10,15,30],lootGoal:[5,6,7],verify:['3d','none'],knowMates:[0,1]}[a.o];if(!ok||!ok.includes(a.v))return'不支援的設定';S.opts[a.o]=a.v;return}
+    if(a.k==='opt'){const ok={deathDelay:[1,2],roundMin:[5,10,12,15,30],lootGoal:[5,6,7],verify:['3d','none'],knowMates:[0,1]}[a.o];if(!ok||!ok.includes(a.v))return'不支援的設定';S.opts[a.o]=a.v;return}
     if(a.k==='game'){if(!GAMES[a.v])return'沒有這款遊戲';S.game=a.v;return}
     if(a.k==='kick'){S.players=S.players.filter(p=>p.id!==a.t);S.kicked[a.t]=1;return}
     if(a.k==='add'){if(S.players.length>=16)return'人數已滿';S.players.push({id:a.id,name:a.name,look:LOOKS[S.players.length%LOOKS.length][1].slice()});return}
     if(a.k==='start'){const G=GAMES[S.game],n=S.players.length;
       if(n<G.min||n>G.max)return`${G.name}需要 ${G.min}–${G.max} 人`;
-      S.pub=[];S.priv={};S.chat=[];S.groups=[];S.result=null;S.phase='play';S.gid=Math.random().toString(36).slice(2,8);
-      if(S.game==='virus')vDeal(S);else cDeal(S);return}
+      begin(S);return}
   }
   if(S.phase!=='play')return'遊戲未在進行';
   return S.game==='virus'?vAct(S,pid,a):cAct(S,pid,a);
@@ -161,7 +174,26 @@ function vApply(S,pid,k,t){
     }else to.forEach(id=>note(S,id,ok?`${nm(S,t)} 是抗體保有者，但本日已經有人成功過一次`:`製藥失敗：${nm(S,t)} 不是抗體保有者`));
   }
 }
-function vUse(S,pid,k,t){const e=vCan(S,pid,k,t);if(e)return e;vApply(S,pid,k,t)}
+function vUse(S,pid,k,t){const e=vCan(S,pid,k,t);if(e)return e;vApply(S,pid,k,t);vOffer(S)}
+// true while somebody still holds something that could change how the game ends
+function vOpen(S){
+  const g=S.g,al=S.players.map(p=>p.id).filter(id=>g.alive[id]),last=g.round>=S.opts.rounds,of=r=>al.filter(id=>g.roles[id]===r);
+  const Ts=of('T'),I=of('I'),Rs=of('R'),sick=al.some(id=>g.inf[id]!=null);
+  if(Ts.length&&!g.virusUsed)return true;                                              // the virus is still in hand
+  if(Ts.some(id=>!(g.used[id]||{}).bullet))return true;                                // a terrorist bullet
+  if(sick&&Ts.some(id=>!(g.used[id]||{}).antidote))return true;                        // an antidote, with somebody to use it on
+  if(I.length&&(!last||I.some(id=>!(g.ru[id]||{}).bullet)))return true;                // the investigator gets a bullet every day
+  if(Rs.length&&g.alive[g.antibody]){const today=!g.cureRound&&Rs.some(id=>!(g.ru[id]||{}).research)?1:0;
+    if(g.cure+today+(S.opts.rounds-g.round)>=2)return true}                            // the antidote can still be finished in the days left
+  return false}
+// nothing can change any more: play the remaining days out on a copy and ask the living whether to stop here
+function vOffer(S){
+  const g=S.g;if(S.sim||S.phase!=='play'||S.game!=='virus'||!g||g.round<1)return;
+  if(vOpen(S)){g.offer=null;return}
+  if(g.offer&&g.offer.r===g.round)return;
+  const C=clone(S);C.sim=true;C.pub=[];let n=0;while(C.phase==='play'&&n++<20)vNext(C);if(C.phase!=='over')return;
+  g.offer={r:g.round,winner:C.result.winner,title:C.result.title,why:C.result.why,yes:{},no:false};
+  pub(S,`系統判定：已經沒有任何技能能改變結果，照規則走完會是「${C.result.title}」。存活玩家全數同意就提前結束。`)}
 function vAct(S,pid,a){
   if(!SKN[a.k])return'未知的操作';
   if(S.opts.verify==='3d'&&a.t!==pid)return'要先在場景裡走到他旁邊，做出指定動作';
@@ -169,7 +201,7 @@ function vAct(S,pid,a){
 }
 function vNext(S){
   const g=S.g;
-  if(g.round===0){g.round=1;g.briefEnd=0;g.roundStart=Date.now();pub(S,'第 1 日開始');return}
+  if(g.round===0){g.round=1;g.briefEnd=0;g.roundStart=Date.now();pub(S,'第 1 日開始');vOffer(S);return}
   const r=g.round,ids=S.players.map(p=>p.id).filter(id=>g.alive[id]).sort((a,b)=>g.num[a]-g.num[b]);
   const fresh=[];
   ids.forEach((id,i)=>{if(g.inf[id]!=null&&ids.length>1){const nx=ids[(i+1)%ids.length];if(g.inf[nx]==null&&!fresh.includes(nx))fresh.push(nx)}});
@@ -184,6 +216,7 @@ function vNext(S){
   g.round=r+1;g.roundStart=Date.now();g.cureRound=false;all.forEach(id=>g.ru[id]={x:0});
   pub(S,`第 ${g.round} 日開始`);
   if(g.cure===1&&!g.announced){g.announced=true;pub(S,'公告：解毒劑製造準備中')}
+  vOffer(S);
 }
 function vCheck(S){
   if(S.phase!=='play')return;const g=S.g,all=S.players.map(p=>p.id);
