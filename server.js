@@ -136,7 +136,8 @@ function onMsg(c,m){
     if(S.phase!=='play'||!S.g.alive[pid])return;
     const now=Date.now();q.seen=now;R.last=now;
     const x=+m.x,z=+m.z;if(!isFinite(x)||!isFinite(z)||S.g.briefEnd)return;          // nobody moves during the identity briefing
-    if(q.seat){if(now-q.seat.arm<800||Math.hypot(x-q.x,z-q.z)<.3)return;q.seat=null;q.gi=-1;q.gk='';q.tg=''}   // walking away from the bench = standing up (positions sent just before sitting down are ignored)
+    if(q.seat){if(m.sit===0&&now-q.seat.arm<5000)return;                                   // sent before this phone heard it was seated (a slow phone can take seconds): ignore it
+      if(now-q.seat.arm<800||Math.hypot(x-q.x,z-q.z)<.3)return;q.seat=null;q.gi=-1;q.gk='';q.tg=''}   // walking away from the bench = standing up
     if(E.walkable(x,z,.3)){q.x=x;q.z=z}
     q.r=isFinite(+m.r)?+m.r:q.r;R.dirty.add(pid);
     if(q.act){if(Math.hypot(q.x-q.act.x,q.z-q.act.z)>.4){q.act=null;q.gi=-1;wsSend(c.sock,{t:'gdone',fired:false,k:'',m:'你移動了，動作中斷',a:'x'})}return}

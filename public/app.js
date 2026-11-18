@@ -325,7 +325,7 @@ function topBar(){return hudHtml()+topBar0()+(mode==='net'&&inGame()?'<div id="v
 function topBar0(){return`<div class="row between"><div><h2>${GAMES[S.game].name}</h2><span class="sub">${mode==='local'?'單機輪流':'房號 '+esc(S.code)+((mode==='net'&&S.hostId===me)?'・你是房主':'')}</span></div>
   <div class="row">${mode==='local'&&S.phase!=='lobby'?`<button class="btn sm" data-a="cover">換人</button>`:''}<button class="btn sm" data-a="leave">離開</button></div></div>${ui.net?`<p class="note">${ui.net}</p>`:''}`}
 const thumbs={};
-function thumb(l,w,h){if(!Stage3D||!l)return'';const k=l.join('')+'_'+w;return k in thumbs?thumbs[k]:(thumbs[k]=Stage3D.thumb(l,w,h))}
+function thumb(l,w,h){if(!Stage3D||!l)return'';const q=Math.min(2,Math.max(1,window.devicePixelRatio||1)),k=l.join('')+'_'+w;return k in thumbs?thumbs[k]:(thumbs[k]=Stage3D.thumb(l,Math.round(w*q),Math.round(h*q)))}   // drawn at the screen's real pixel density
 function lookHtml(){
   const mine=S.players.find(p=>p.id===me);if(!mine||mode!=='net'||!Stage3D)return'';
   const L=myLook(),key=L.join(''),P=Stage3D.palette,hex=c=>'#'+c.toString(16).padStart(6,'0');
@@ -586,7 +586,10 @@ function gsTop(){
     <div class="gs-tabs"><span id="vmini"></span>${gsTabs().map(([k,l])=>`<button class="btn sm ${ui.tab===k?'on':''}" data-a="tab" data-v="${k}">${l}${un[k]?` <b class="un">${un[k]}</b>`:''}</button>`).join('')}</div></div>`}
 function menuHtml(){
   const v=S.game==='virus';
-  return`<section class="panel"><h3>聲音與語音</h3><div class="row hudbtns">${narrBtns()}${sndBtns()}</div>${inGame()?'<div id="vbar" class="vbar"></div>':''}</section>
+  const qm=Stage3D&&Stage3D.qualityMode?Stage3D.qualityMode():'auto';
+  return`<section class="panel"><h3>畫質</h3><div class="row hudbtns">${[['auto','自動'],['high','高'],['mid','中'],['low','省電']].map(([k,l])=>`<button class="btn sm ${qm===k?'on':''}" data-a="quality" data-v="${k}">${l}</button>`).join('')}</div>
+      <p class="sub">「自動」先用高畫質，手機跟不上時自動降低解析度與描邊，優先保持流暢。</p></section>
+    <section class="panel"><h3>聲音與語音</h3><div class="row hudbtns">${narrBtns()}${sndBtns()}</div>${inGame()?'<div id="vbar" class="vbar"></div>':''}</section>
     ${S.phase==='over'?'':isBrief()?briefHost():v?vHostHtml():cHostHtml()}
     <section class="panel"><div class="row between"><div><h2>${GAMES[S.game].name}</h2><span class="sub">房號 ${esc(S.code)}${S.hostId===me?'・你是房主':''}</span></div><button class="btn sm" data-a="leave">離開</button></div>
       <p class="sub">遊戲進行時固定用橫向畫面。手機直立拿著時畫面會自動轉 90 度，把手機橫過來就可以了。</p></section>
@@ -644,10 +647,16 @@ function render(){
   const a=document.activeElement,fid=a&&a.id,pos=a&&a.selectionStart;
   const om=document.getElementById('msgs'),stick=!om||om.scrollTop+om.clientHeight>=om.scrollHeight-30,otop=om?om.scrollTop:0;
   const osd=document.getElementById('side'),sdTab=osd&&osd.dataset.tab,sdTop=osd?osd.scrollTop:0;
-  if(Stage3D&&Stage3D.el.parentNode)Stage3D.el.remove();
   const game=gsOn(),was=document.body.classList.contains('game');document.body.classList.toggle('game',game);if(was&&!game)unlock();layout();
   if(Stage3D)Stage3D.fill=game;
-  ui._acts=[];app.innerHTML=view();
+  ui._acts=[];
+  // on the game screen only the top bar and the side drawer are rebuilt; the 3D canvas stays where it is, so the picture never blinks
+  const gsEl=game&&was&&Stage3D&&app.firstElementChild&&app.firstElementChild.classList.contains('gs')?app.firstElementChild:null,keep=gsEl&&Stage3D.el.parentNode&&gsEl.contains(Stage3D.el);
+  if(keep){const tp=document.createElement('template');tp.innerHTML=view();const nw=tp.content.firstElementChild;
+    if(nw&&nw.classList.contains('gs')){gsEl.className=nw.className;gsEl.querySelector('.gs-top').replaceWith(nw.querySelector('.gs-top'));
+      const os=gsEl.querySelector('.gs-side'),ns=nw.querySelector('.gs-side');if(os&&ns)os.replaceWith(ns);else if(os)os.remove();else if(ns)gsEl.querySelector('.gs-main').appendChild(ns)}
+    else{Stage3D.el.remove();app.innerHTML=tp.innerHTML}}
+  else{if(Stage3D&&Stage3D.el.parentNode)Stage3D.el.remove();app.innerHTML=view()}
   if(Stage3D)Stage3D.roam=!!(game&&S.phase==='over'&&S.game==='virus'&&ui.roam);
   const nsd=document.getElementById('side');if(nsd&&nsd.dataset.tab===sdTab)nsd.scrollTop=sdTop;
   const slot=document.getElementById('stage-slot');
@@ -678,6 +687,7 @@ app.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(!el||e
 const H={
   pickgame(v){ui.game=v;render()},
   tab(v){ui.tab=ui.tab===v?'':v;render()},
+  quality(v){if(Stage3D)Stage3D.setQuality(v);render()},
   settle(v){go({k:'settle',v:v==='1'});if(mode==='net')render()},
   rematch(){go({k:'rematch',v:!(S.again||{})[me]})},
   roam(){ui.roam=!ui.roam;if(ui.roam)ui.tab='';else ui.tab='res';render()},
