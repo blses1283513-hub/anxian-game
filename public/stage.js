@@ -490,7 +490,7 @@ window.Stage3D=(()=>{
       if(rk!==f.artKey){if(f.art){f.g.remove(f.art);freeTree(f.art)}f.art=null;f.artKey=rk;
         if(rk){const pi=S.players.findIndex(q=>q.id===id);f.artH=roleHuman(rk.replace('~',''),{ghost:!over,look:S.players[pi].look||A.LOOKS[pi%A.LOOKS.length][1]});f.art=f.artH.g;f.g.add(f.art);if(f.inkNear===false)for(const o of f.artH.inks)o.visible=false;f.pop=(fresh||still)?1:0;f.pivot.visible=false;f.gl.visible=false}else f.pivot.visible=true}
       if(R&&(!alive||over)&&!f.role){f.role=label(R.n,'#f1cf63',.055,{depth:false});f.role.position.y=2.34;f.role.center.set(.5,-.6);f.g.add(f.role)}
-      const tgt=id!==me&&(ui.t===id&&ui.pick||ui.ft===id||(ui.armed&&ui.armed.t===id));f.ring.visible=tgt||(id===me&&(alive||over));f.bub.visible=!!speak[id]&&!f.art;f.ring.material.color.setHex(tgt?0xe2594c:0xe8a33d);
+      const tgt=id!==me&&(ui.t===id&&ui.pick||ui.ft===id||(ui.armed&&ui.armed.t===id));f.ring.visible=tgt||(id===me&&(alive||over));f.bub.visible=!!speak[id]&&!f.art&&!CINE;f.ring.material.color.setHex(tgt?0xe2594c:0xe8a33d);
     }
     const roam=over&&api.roam,mine=figs[me]&&(roam||(g.alive[me]!==false&&S.phase==='play')),ghost=!!figs[me]&&S.phase==='play'&&g.alive[me]===false;
     const walk=(mine||ghost)&&api.walk;stick.hidden=!walk;mini.hidden=over&&!roam;ctx.hidden=!walk||over||ghost;if(!walk)tip.textContent='拖曳畫面轉視角';
@@ -570,7 +570,7 @@ window.Stage3D=(()=>{
         if(busy&&f.artH){rigPose(f.artH,{w:mode==='ghost'?0:wk,ph:f.ph||0,t:t/1000,gi:-1,mode,look:mode?null:look,talk:!!speak[id]},f.aT);f.aT=0}continue}
       const gi=p.gi,dk=env.dark.length&&env.dark.includes(A.roomOf(f.g.position.x,f.g.position.z));
       if(gi!==f.gi){f.gi=gi;for(const k in f.props)f.props[k].visible=gi>=0&&GL[gi][2]===k;if(gi>=0){f.gl.material.map=texOf(GN[gi],'#ffe9a8');f.gl.material.needsUpdate=true}}
-      const far=id!==me&&d2>64;                 // past 8 m only the seat mark shows, so 16 name tags do not pile up
+      const far=(CINE&&cineMarks)||id!==me&&d2>64;                 // past 8 m only the seat mark shows, so 16 name tags do not pile up
       f.gl.visible=gi>=0&&!dk;f.name.visible=!dk&&!far;f.cmk.visible=!dk&&far;f.dmk.visible=!!dk;f.sr.visible=!dk;     // in a dark room nobody can read what you are doing: only the outline of the seat mark shows
       if(busy){rigPose(f.rig,{w:gi>=0?0:wk,ph:f.ph||0,t:t/1000,gi,mode:'',look:gi>=0?null:look,talk:!!speak[id]},f.aT);f.aT=0}
     }
@@ -649,16 +649,27 @@ window.Stage3D=(()=>{
   function quality(t){
     if(!qT0||t-qT0>4500){qT0=t;qN=0;return}qN++;const e=t-qT0;if(e<2500)return;const fps=qN*1000/e;qT0=t;qN=0;
     if(fps>=24||qLv>=2||pxq||qMode!=='auto')return;qLv++;applyQ()}
-  function frame(t){
-    if(!el.isConnected){raf=0;return}raf=requestAnimationFrame(frame);quality(t);
-    const dt=Math.min(.2,(t-lastT)/1000||0);lastT=t;   // walking speed must not depend on the frame rate
+  function frame(t,manual){
+    if(CINE&&!manual){raf=0;return}                                   // director mode: the page drives every frame itself
+    if(!manual){if(!el.isConnected){raf=0;return}raf=requestAnimationFrame(frame);quality(t)}
+    const dt=manual?manual:Math.min(.2,(t-lastT)/1000||0);lastT=t;   // walking speed must not depend on the frame rate
     if(kind==='virus')stepRoom(dt,t);
     else{const kp=1-Math.exp(-dt*9);shadows.begin();for(const id in pawns){const p=pawns[id];p.m.position.lerp(p.to,kp);p.m.rotation.y=yaw;if(p.m.visible)shadows.put(p.m.position.x,.02,p.m.position.z,p.m.scale.x*.6)}shadows.end();
       if(!still)dyn.children.forEach(o=>{if(o.userData.spin)o.rotation.y=t/900});
       cam.position.set(Math.sin(yaw)*fit*.4,fit*.92,Math.cos(yaw)*fit*.4+.15);cam.lookAt(0,0,.15)}
-    if(flash.intensity>0)flash.intensity=Math.max(0,flash.intensity-.08);
+    if(flash.intensity>0)flash.intensity=Math.max(0,flash.intensity-.08*(manual?manual*60:1));
+    if(CINE&&cineCam){cam.fov=cineCam.fov||cam.fov;cam.updateProjectionMatrix();cam.position.set(cineCam.p[0],cineCam.p[1],cineCam.p[2]);cam.lookAt(cineCam.l[0],cineCam.l[1],cineCam.l[2]);
+      for(const sg of eo.signs)sg.visible=sg.position.distanceToSquared(cam.position)>14}
     if(!noDraw)renderer.render(scene,cam);
   }
+  /* ---------- director mode (?cine=1), for promo videos: a fixed frame size, a placed camera, and one frame at a time on request ---------- */
+  const CINE=new URLSearchParams(location.search).get('cine')==='1';let cineCam=null,cineMarks=true,cineDim=null;
+  api.cine={on:CINE,
+    size(w,h){renderer.setPixelRatio(1);api.fill=true;el.style.width=w+'px';el.style.height=h+'px';renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix()},
+    cam(p,l,fov){cineCam=p?{p,l,fov}:null},marks(v){cineMarks=!!v},
+    flash(x,z,v){flash.position.set(x,1.6,z);flash.intensity=v==null?3:v},
+    dim(v){if(!cineDim){cineDim=new T.Mesh(new T.PlaneGeometry(4,4),new T.MeshBasicMaterial({color:0x02040a,transparent:true,opacity:0,depthTest:false,depthWrite:false}));cineDim.position.z=-.2;cineDim.renderOrder=4;cam.add(cineDim);scene.add(cam)}cineDim.material.opacity=v;cineDim.visible=v>0},   // a dark room, as the camera sees it: seat marks (drawn later) stay on top
+    step(t,dt){frame(t,dt||1/24);return renderer.domElement.toDataURL('image/jpeg',.92)}};
   /* ---------- input ---------- */
   let down=null;
   cv.addEventListener('pointerdown',e=>{if(down)return;down={id:e.pointerId,x:e.clientX,y:e.clientY,moved:0};try{cv.setPointerCapture(e.pointerId)}catch(_){}});
@@ -698,7 +709,7 @@ window.Stage3D=(()=>{
     if(mineP&&(!mine||seated)){me3.x=mineP[0];me3.z=mineP[1]}
     if(mineP&&!me3.ok){me3={x:mineP[0],z:mineP[1],r:mineP[2],ok:true};camYaw=mineP[2]}};
   api.dist=distTo;api.range=RANGE;
-  api.speak=(id,v)=>{speak[id]=!!v;const f=figs[id];if(f)f.bub.visible=!!v&&!f.art};
+  api.speak=(id,v)=>{speak[id]=!!v;const f=figs[id];if(f)f.bub.visible=!!v&&!f.art&&!CINE};
   api.inRoom=()=>kind==='virus'&&me3.ok;
   api.gesture=(gi,t,k,name)=>{if(kind!=='virus'||!figs[t])return'對象不在場';if(seated)return'請先站起來';if(distTo(t)>RANGE)return'太遠了，先走到他旁邊（約兩步內）';prog=null;gest={gi,t,k:k||'',name:name||'',t0:Date.now()};beat();return''};
   // while an action is being held the server must keep hearing from us, even if this phone draws only a frame or two per second
