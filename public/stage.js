@@ -231,7 +231,7 @@ window.Stage3D=(()=>{
       tea:{kind:'checker',base:0xd5cdb2,alt:0x8aa58a,tile:.5},music:{kind:'carpet',base:0x4a3346,alt:0xc9a85a,grain:.22},store:{kind:'concrete',base:0x6a665c},clinic:{kind:'tiles',base:0x7fa6a2,tile:.42},corr:{kind:'stone',base:0x5a6068,tile:.8}};
     const lights={round:[[tb.x,tb.z,6.5,.32]],lounge:[[lg.x,lg.z,6.5,.3]]},shades={round:[[tb.x,tb.z+.15,2.6,2.6,.5]],lounge:M.benches.map(b=>{const along=Math.abs(Math.sin(b.r))>.5;return[b.x,b.z,along?.6:2.3,along?2.3:.6,.4]}),
       library:[[sh.x,sh.z-.5,2.6,.5,.5],[-15.2,-11.2,1.0,1.0,.45]],locker:[[lk.x,lk.z-.45,2.4,.5,.5]],tea:[[tt.x,tt.z,1.1,1.1,.5],[11.5,-16.5,2.8,.5,.4]],
-      music:[[D.piano.x,D.piano.z,1.3,1.1,.5]],clinic:[[D.bed.x,D.bed.z,.9,1.3,.5],[7.2,16.2,.5,.4,.4]],store:[[D.crates.x+.2,D.crates.z,1.3,1.3,.55],[-13.4,16.2,.55,.55,.45]]};
+      music:[[D.piano.x,D.piano.z,1.3,1.1,.5]],clinic:[[D.bed.x,D.bed.z,.9,1.3,.5],[7.2,16.2,.5,.4,.4],[M.scanner.x,M.scanner.z,.7,.6,.5]],store:[[D.crates.x+.2,D.crates.z,1.3,1.3,.55],[-13.4,16.2,.55,.55,.45]]};
     const rugs={round:[{x:tb.x,z:tb.z,r:3.1,c:0x6b2b33,c2:0xd9b86a}],lounge:[{x:lg.x,z:lg.z,r:2.5,c:0x3d4f6b,c2:0xc9b78a}],library:[{x:-14.6,z:-11.6,r:1.6,c:0x5d4632,c2:0xc8a46a}]};
     M.rooms.forEach((r,ri)=>{const w=r.x1-r.x0,d=r.z1-r.z0,lx=w>d,cf=Object.assign({},FL[r.id]),li=([x,z,rad,a])=>({x:x-r.x0,z:z-r.z0,r:rad,a}),sd=([x,z,rx,rz,a])=>({x:x-r.x0,z:z-r.z0,rx,rz,a});
       cf.w=w;cf.d=d;cf.seed=ri+3;
@@ -333,6 +333,10 @@ window.Stage3D=(()=>{
     put('paint',rb(1.25,.08,2.05,.03,1),0xc8ccd0,P(bd.x,.48,bd.z));put('paint',rb(1.25,.7,.06,.03,2),0xc8ccd0,P(bd.x,.75,bd.z+1.0));
     put('fabric',rb(1.15,.2,1.95,.08,3),0xf4f6f6,P(bd.x,.62,bd.z));put('fabric',SPH,0xffffff,P(bd.x,.78,bd.z+.68,0,0,0,.42,.1,.22));put('fabric',rb(1.2,.12,1.25,.06,3),0x8fc4dc,P(bd.x,.74,bd.z-.32));
     put('paint',rb(.7,1.1,.45,.05,2),0xe4ecec,P(7.2,.55,16.2));put('paint',rb(.3,.08,.02,.01,1),0xe2594c,P(7.2,.9,15.97));put('paint',rb(.08,.3,.02,.01,1),0xe2594c,P(7.2,.9,15.97));
+    // ---- 醫務室: the infection scanner, a white pedestal with a glowing screen and a hand pad
+    const sc=M.scanner;put('paint',rb(.72,1.0,.6,.05,2),0xe4ecec,P(sc.x,.5,sc.z));put('paint',rb(.8,.08,.68,.03,1),0x3d5560,P(sc.x,1.04,sc.z));
+    put('glow',rb(.42,.03,.42,.01,1),0x7fe8cf,P(sc.x,1.09,sc.z));put('paint',rb(.2,.62,.06,.02,1),0x3d5560,P(sc.x,1.38,sc.z-.24));
+    put('glow',rb(.5,.34,.04,.01,1),0x3fc7a8,P(sc.x,1.52,sc.z-.2));put('paint',rb(.28,.07,.02,.01,1),0xe2594c,P(sc.x,.72,sc.z+.31));put('paint',rb(.07,.28,.02,.01,1),0xe2594c,P(sc.x,.72,sc.z+.31));
     // ---- 儲藏室: plank crates, a barrel and sacks
     const crate=(x,y,z,s,ry)=>{const base=P(x,y,z,ry);put('wood',rb(s,s,s,.04,2),0x8a6640,P(0,0,0,0,0,0,1,1,1,base));
       for(const sd of [-1,1]){put('wood',rb(s+.02,.1,.04,.02,1),0x6b4a2c,P(0,sd*s*.38,s/2,0,0,0,1,1,1,base));put('wood',rb(s+.02,.1,.04,.02,1),0x6b4a2c,P(0,sd*s*.38,-s/2,0,0,0,1,1,1,base))}
@@ -397,6 +401,7 @@ window.Stage3D=(()=>{
     if(room==='library'&&d(M.shelf)<=2.0)o.push({t:'shelf'});
     if(room==='locker'&&d(M.lockers)<=2.0)o.push({t:'lockers'});
     if(room==='tea'&&d(M.tea)<=2.0)o.push({t:'tea'});
+    if(room==='clinic'&&d(M.scanner)<=2.0)o.push({t:'scanner'});
     const sw=M.switches[room];if(sw&&d(sw)<=1.9)o.push({t:'switch',room,dark:env.dark.includes(room)});
     return o}
   function stepRoom(dt,t){

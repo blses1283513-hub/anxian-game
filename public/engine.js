@@ -10,7 +10,10 @@ const GAMES={
   chase:{name:'地鐵追捕',min:5,max:14,ds:'小偷在路線圖上隱藏移動收集贓物，三隊警察調查與逮捕，隊裡藏著內鬼。'}
 };
 function newState(game,hostId,code){return{v:1,code,game,hostId,phase:'lobby',players:[],kicked:{},
-  opts:{deathDelay:2,rounds:5,roundMin:12,lootGoal:6,maxRounds:15,verify:'3d',knowMates:0,briefSec:60},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
+  opts:{deathDelay:2,rounds:5,roundMin:'std',lootGoal:6,maxRounds:15,verify:'3d',knowMates:0,novice:0,briefSec:60},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
+/* day lengths: 'std' = the standard schedule, day 1 to 5; a number = the same length every day */
+const SCHED=[8,10,10,5,3];
+const dayMin=(S,r)=>S.opts.roundMin==='std'?SCHED[Math.min(Math.max(r||1,1),SCHED.length)-1]:+S.opts.roundMin||12;
 const nm=(S,id)=>{const p=S.players.find(p=>p.id===id);return p?p.name:'？'};
 function pub(S,t){S.pubN=(S.pubN||0)+1;S.pub.push({r:S.g?S.g.round:0,t});if(S.pub.length>150)S.pub.shift()}
 function note(S,id,t){(S.priv[id]=S.priv[id]||[]).push({r:S.g.round,t})}
@@ -56,7 +59,8 @@ function act(S,pid,a,isHost){
     if(a.k==='next'){if(S.phase!=='play')return'遊戲未在進行';if(S.game==='chase'&&S.g.briefEnd)return briefDone(S);return S.game==='virus'?vNext(S):cAdvance(S,true)}
     if(a.k==='again'){S.phase='lobby';S.g=null;S.result=null;S.again={};S.pub=[];S.priv={};S.chat=[];S.groups=[];return}
     if(S.phase!=='lobby')return'遊戲已開始';
-    if(a.k==='opt'){const ok={deathDelay:[1,2],roundMin:[5,10,12,15,30],lootGoal:[5,6,7],verify:['3d','none'],knowMates:[0,1]}[a.o];if(!ok||!ok.includes(a.v))return'不支援的設定';S.opts[a.o]=a.v;return}
+    if(a.k==='opt'){const ok={deathDelay:[1,2],roundMin:['std',5,10,12,15,30],lootGoal:[5,6,7],verify:['3d','none'],knowMates:[0,1],novice:[0,1]}[a.o];if(!ok||!ok.includes(a.v))return'不支援的設定';S.opts[a.o]=a.v;
+      if(a.o==='novice'&&a.v)S.opts.knowMates=1;if(a.o==='knowMates'&&!a.v)S.opts.novice=0;return}
     if(a.k==='game'){if(!GAMES[a.v])return'沒有這款遊戲';S.game=a.v;return}
     if(a.k==='kick'){S.players=S.players.filter(p=>p.id!==a.t);S.kicked[a.t]=1;return}
     if(a.k==='add'){if(S.players.length>=16)return'人數已滿';S.players.push({id:a.id,name:a.name,look:LOOKS[S.players.length%LOOKS.length][1].slice()});return}
@@ -65,6 +69,8 @@ function act(S,pid,a,isHost){
       begin(S);return}
   }
   if(S.phase!=='play')return'遊戲未在進行';
+  if(a.k==='scan'){if(S.game!=='virus')return'沒有這個操作';if(S.opts.verify==='3d')return'要走到醫務室的感染檢測儀旁邊才能使用';return vScan(S,pid)}
+  if(S.practice&&S.game==='virus')return'練習場不會發動技能，只練習動作';
   return S.game==='virus'?vAct(S,pid,a):cAct(S,pid,a);
 }
 
@@ -97,7 +103,8 @@ const MAP={
     {ax:'x',c:-6,p:-9.5,w:2.4},{ax:'x',c:-6,p:9.5,w:2.4},{ax:'x',c:6,p:-9.5,w:2.4},{ax:'x',c:6,p:9.5,w:2.4},{ax:'z',c:-2,p:0,w:4},{ax:'z',c:2,p:0,w:4}],
   size:17,table:{x:-9.5,z:0,r:2.1},lounge:{x:9.5,z:0},
   deco:{piano:{x:4.6,z:15.6},bed:{x:15.6,z:15.4},crates:{x:-15.7,z:15.7}},
-  obs:[{x:-9.5,z:0,r:2.1},{x:11.5,z:-13,r:.75},{x:4.6,z:15.6,r:1.0},{x:15.6,z:15.4,r:1.1},{x:-15.7,z:15.7,r:1.0},   // table, tea table, piano, bed, crates
+  scanner:{x:8.2,z:12.4},                                                  // 醫務室的感染檢測儀
+  obs:[{x:-9.5,z:0,r:2.1},{x:11.5,z:-13,r:.75},{x:4.6,z:15.6,r:1.0},{x:15.6,z:15.4,r:1.1},{x:-15.7,z:15.7,r:1.0},{x:8.2,z:12.4,r:.5},   // table, tea table, piano, bed, crates
     {x:-16.3,z:-5.3,r:.32},{x:-16.3,z:5.3,r:.32},{x:-2.7,z:-5.3,r:.32},{x:-2.7,z:5.3,r:.32},{x:2.7,z:-5.3,r:.32},{x:2.7,z:5.3,r:.32},{x:16.4,z:-5.55,r:.3},{x:16.4,z:5.55,r:.3},   // potted plants
     {x:-15.2,z:-11.2,r:.62},{x:-13.4,z:16.2,r:.42},{x:-5.2,z:16.2,r:.32},{x:7.2,z:16.2,r:.38},{x:-12.2,z:16.15,r:.35},   // reading table, barrel, music-room plant, clinic cabinet, sacks
     ...[9.25,9.75,10.25,10.75,11.25,11.75,12.25,12.75,13.25,13.75].map(x=>({x,z:-16.55,r:.15}))],                         // the tea-room counter along the wall
@@ -126,9 +133,10 @@ const okLook=l=>Array.isArray(l)&&l.length===8&&l.every((v,i)=>Number.isInteger(
 const VSK={T:['infect','shoot','antidote'],I:['shoot'],J:['check'],R:['research']};
 const SKN={infect:'投放病毒',shoot:'開槍',antidote:'解毒劑',check:'查驗身分',research:'製藥'};
 const vTask=(S,pid,k)=>{const t=S.g.task&&S.g.task[pid];return t&&t[k]!=null?TASKS[t[k]]:null};
-function vComp(n){const T=n>=8?2:1,R=2,J=1,I=n>=7?1:0,F=n>=10?1:0;return{T,R,J,I,F,C:n-T-R-J-I-F}}
+function vComp(n,novice){const T=n>=8?2:1,R=2,J=novice?0:1,I=n>=7?1:0,F=novice||n<10?0:1;return{T,R,J,I,F,C:n-T-R-J-I-F}}   // 新手局: no journalist, no zealot
 function vDeal(S){
-  const ids=S.players.map(p=>p.id),c=vComp(ids.length),roles=[];
+  if(S.opts.novice)S.opts.knowMates=1;                                 // 新手局: team-mates always know each other
+  const ids=S.players.map(p=>p.id),c=vComp(ids.length,S.opts.novice),roles=[];
   for(const k of 'TRJIFC')for(let i=0;i<c[k];i++)roles.push(k);
   shuffle(roles);const nums=shuffle(ids.map((_,i)=>i+1)),seats=ids.map((_,i)=>i+1);   // seat numbers follow the order people joined
   const g=S.g={round:0,roundStart:0,roles:{},num:{},alive:{},inf:{},used:{},ru:{},virusUsed:false,cure:0,cureRound:false,announced:false,deathRound:{},seat:{},stats:{inf:0,dead:0,cure:0}};
@@ -178,6 +186,18 @@ function vApply(S,pid,k,t){
   }
 }
 function vUse(S,pid,k,t){const e=vCan(S,pid,k,t);if(e)return e;vApply(S,pid,k,t);vOffer(S)}
+/* the infection scanner in the clinic: anyone alive, once a day; the result is announced to everybody */
+function vScan(S,pid){const g=S.g;if(!g||S.game!=='virus')return'沒有這個操作';
+  if(!g.roles[pid]||!g.alive[pid])return'你已出局';if(g.round<1)return'第 1 日開始後才能使用';
+  const ru=g.ru[pid]||(g.ru[pid]={x:0});if(ru.scan)return'你今天已經檢測過了，明天再來';
+  ru.scan=1;const sick=g.inf[pid]!=null;
+  pub(S,`${nm(S,pid)} 使用感染檢測儀：${sick?'已感染':'未感染'}`);note(S,pid,`你的檢測結果：${sick?'已感染':'未感染'}`);return null}
+/* the action practice room: me and three dummies in the building, the day never ends and no skill goes off */
+function practice(S){begin(S);const g=S.g,ids=S.players.map(p=>p.id),[mine,...dummies]=ids;S.practice=1;
+  ids.forEach(id=>{g.roles[id]=id===mine?'T':'C';g.task[id]={x:0}});g.antibody=dummies[0];
+  const pool=shuffle(TASKS.map((_,i)=>i));VSK.T.forEach((k,i)=>g.task[mine][k]=pool[i]);
+  S.pub=[];g.briefEnd=0;g.round=1;g.roundStart=Date.now();
+  pub(S,'練習場：這裡只有你和三個假人，時間不會結束，技能也不會真的發動。走到假人旁邊試做動作，或去醫務室試用感染檢測儀。')}
 // true while somebody still holds something that could change how the game ends
 function vOpen(S){
   const g=S.g,al=S.players.map(p=>p.id).filter(id=>g.alive[id]),last=g.round>=S.opts.rounds,of=r=>al.filter(id=>g.roles[id]===r);
@@ -203,7 +223,7 @@ function vAct(S,pid,a){
   return vUse(S,pid,a.k,a.t);
 }
 function vNext(S){
-  const g=S.g;
+  const g=S.g;if(S.practice)return'練習場沒有結算';
   if(g.round===0){g.round=1;g.briefEnd=0;g.roundStart=Date.now();pub(S,'第 1 日開始');vOffer(S);return}
   const r=g.round,ids=S.players.map(p=>p.id).filter(id=>g.alive[id]).sort((a,b)=>g.num[a]-g.num[b]);
   const fresh=[];
@@ -353,6 +373,6 @@ function redact(S,pid){
   return V;
 }
 
-const AX={LOOKS,LOOK_MAX,MAP,roomOf,isHall,sees,walkable,blocked,spawnOf,briefDone,GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,vUse,ST,ADJ,LINES,TEAMS,cActive,cStageName,redact,clone,rnd};
+const AX={SCHED,dayMin,vScan,practice,LOOKS,LOOK_MAX,MAP,roomOf,isHall,sees,walkable,blocked,spawnOf,briefDone,GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,vUse,ST,ADJ,LINES,TEAMS,cActive,cStageName,redact,clone,rnd};
 if(typeof module!=='undefined'&&module.exports)module.exports=AX;else window.AX=AX;
 })();

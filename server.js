@@ -7,7 +7,7 @@ const PORT=+process.env.PORT||3000,PUB=path.join(__dirname,'public');
 const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg','.m4a':'audio/mp4','.wav':'audio/wav'};
 const RANGE=1.9,HOLD=3000;
 const BRIEF=process.env.BRIEF_SECONDS!==undefined?+process.env.BRIEF_SECONDS:null; // BRIEF_SECONDS is for testing only
-const ROUND_MS=S=>process.env.ROUND_SECONDS?+process.env.ROUND_SECONDS*1000:S.opts.roundMin*60000; // ROUND_SECONDS is for testing only
+const ROUND_MS=S=>process.env.ROUND_SECONDS?+process.env.ROUND_SECONDS*1000:E.dayMin(S,S.g.round)*60000; // ROUND_SECONDS is for testing only
 
 const server=http.createServer((req,res)=>{
   let u=decodeURIComponent(req.url.split('?')[0]);if(u==='/')u='/index.html';
@@ -90,6 +90,8 @@ function inTea(R,id){const t=R.pos[id];return!!(t&&R.S.g.alive[id]&&roomOfP(t)==
 function alone(R,room,a,b){const ids=Object.keys(R.pos).filter(id=>R.S.g.alive[id]&&roomOfP(R.pos[id])===room);return ids.length===2&&ids.includes(a)&&ids.includes(b)}
 /* an action is complete: the skill fires only if this action is the actor's secret condition for it */
 function fire(R,pid,gk,gt,gi,a){const S=R.S;let fired=false,msg='';
+  if(S.practice){const c=R.cl.get(pid),task=gk&&S.g.task[pid]?S.g.task[pid][gk]:null;
+    if(c)wsSend(c.sock,{t:'gdone',fired:false,k:'',m:`練習：「${E.GN[gi]}」完成`+(gk?(task===gi?`，正式對局中這樣會發動「${E.SKN[gk]}」`:`，但「${E.SKN[gk]}」的條件是「${E.GN[task]}」`):''),a:a||''});return false}
   if(gk){const task=S.g.task[pid]&&S.g.task[pid][gk];if(task===gi){const e=E.vUse(S,pid,gk,gt);if(e)msg='沒有發動：'+e;else fired=true}}
   const c=R.cl.get(pid);if(c)wsSend(c.sock,{t:'gdone',fired,k:gk,m:msg,a:a||''});return fired}
 function bind(c,R,pid){const old=R.cl.get(pid);if(old&&old!==c){wsSend(old.sock,{t:'gone',m:'你在另一個裝置或分頁重新加入了'});old.room=null;voiceOff(R,pid)}
@@ -101,6 +103,13 @@ function onMsg(c,m){
     let code;do{code=Array.from({length:4},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ'[crypto.randomInt(24)]).join('')}while(rooms.has(code));
     const S=E.newState(E.GAMES[m.game]?m.game:'virus',pid,code);if(BRIEF!==null)S.opts.briefSec=BRIEF;S.players.push({id:pid,name:clean(m.name)||'房主',look:E.LOOKS[0][1].slice()});
     const R={S,cl:new Map(),pos:{},dirty:new Set(),last:Date.now(),keys:{},voice:new Set()};R.keys[pid]=String(m.key||'');rooms.set(code,R);bind(c,R,pid);pushState(R);return}
+  if(m.t==='practice'){                                                          // a private room for practising the actions
+    const pid=clean(m.pid);if(pid.length<6)return;
+    let code;do{code=Array.from({length:4},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ'[crypto.randomInt(24)]).join('')}while(rooms.has(code));
+    const S=E.newState('virus',pid,code);S.players.push({id:pid,name:clean(m.name)||'我',look:E.LOOKS[0][1].slice()});
+    ['甲','乙','丙'].forEach((n,i)=>S.players.push({id:'dummy'+i+'_'+code,name:'假人'+n,look:E.LOOKS[[3,12,6][i]][1].slice()}));
+    E.practice(S);const R={S,cl:new Map(),pos:{},dirty:new Set(),last:Date.now(),keys:{},voice:new Set()};R.keys[pid]=String(m.key||'');rooms.set(code,R);bind(c,R,pid);
+    spawn(R);pushState(R);c.vroom=viewRoom(R,pid);c.vphase=S.phase;sendAllPos(R,c,1);return}
   if(m.t==='join'){
     const pid=clean(m.pid),R=rooms.get(String(m.code||'').toUpperCase());if(pid.length<6)return;
     if(!R){wsSend(c.sock,{t:'err',m:'找不到這個房間，可能已經結束了',fatal:1});return}
@@ -117,6 +126,7 @@ function onMsg(c,m){
   if(m.t==='voice'){if(!S.players.some(p=>p.id===pid))return;if(m.on)R.voice.add(pid);else R.voice.delete(pid);voiceList(R);return}
   if(m.t==='rtc'){const to=String(m.to||''),k=R.cl.get(to);if(k&&R.voice.has(pid)&&R.voice.has(to)&&mayTalk(R,pid,to))wsSend(k.sock,{t:'rtc',from:pid,d:m.d});return}
   if(m.t==='leave'){R.cl.delete(pid);voiceOff(R,pid);c.room=null;
+    if(S.practice){rooms.delete(S.code);return}
     if(S.phase==='lobby'&&pid!==S.hostId){S.players=S.players.filter(p=>p.id!==pid);pushState(R)}
     else if(S.phase==='over')afterQuit(R,pid);
     return}
@@ -162,6 +172,8 @@ function onMsg(c,m){
     if(m.a==='book'||m.a==='letter'){const k=+m.n;
       if(!near(q,m.a==='book'?E.MAP.shelf:E.MAP.lockers,2.2))return fail(m.a==='book'?'離書架太遠了':'離置物櫃太遠了');
       if(!(Number.isInteger(k)&&k>=1&&k<=n))return;start(m.a,m.a==='book'?8:9,{n:k});return}
+    if(m.a==='scan'){if(roomOfP(q)!=='clinic'||!near(q,E.MAP.scanner,2.2))return fail('離感染檢測儀太遠了');
+      const e=E.vScan(S,pid);if(e)return fail(e);pushState(R);return}
     if(m.a==='tea'){if(roomOfP(q)!=='tea'||!near(q,E.MAP.tea,2.2))return fail('離茶桌太遠了');start('tea',10,{ok:inTea(R,gt)});return}
     if(m.a==='light'){const room=roomOfP(q),sw=E.MAP.switches[room];if(!sw||!near(q,sw,2.2))return fail('離電燈開關太遠了');
       const mine=gk&&g.task[pid]&&g.task[pid][gk]===11;
@@ -197,7 +209,7 @@ setInterval(()=>{
           else if(A.a==='light'){ok=A.ok&&!!R.env.dark[A.room]&&alone(R,A.room,pid,A.gt);why=R.env.dark[A.room]?'房間裡不是只有你和對象兩個人':'燈被打開了'}
           if(ok){if(fire(R,pid,A.gk,A.gt,A.gi,A.a))changed=true}
           else{const mine=A.gk&&g.task[pid]&&g.task[pid][A.gk]===A.gi,c=R.cl.get(pid);                 // tell only the actor why a prepared skill did not go off
-            if(c)wsSend(c.sock,{t:'gdone',fired:false,k:'',m:mine?'沒有發動：'+why:'',a:A.a})}
+            if(c)wsSend(c.sock,{t:'gdone',fired:false,k:'',m:S.practice?`練習：「${E.GN[A.gi]}」做完了`+(A.gk?`，但條件不成立：${why}`:''):mine?'沒有發動：'+why:'',a:A.a})}
           continue}
         if(q.gi<0)continue;                                             // a gesture next to the target
         if(!live){q.gi=-1;q.gt='';q.gk='';R.dirty.add(pid);continue}
@@ -206,7 +218,7 @@ setInterval(()=>{
         if(now-q.since<HOLD)continue;
         q.done=true;if(fire(R,pid,q.gk,q.gt,q.gi,'g'))changed=true;
       }
-      if(S.phase==='play'&&S.g.round>=1&&now>=S.g.roundStart+ROUND_MS(S)){const r=S.g.round;E.act(S,null,{k:'next'},true);pushState(R,`第 ${r} 日時間到，已自動結算`);changed=false}
+      if(S.phase==='play'&&!S.practice&&S.g.round>=1&&now>=S.g.roundStart+ROUND_MS(S)){const r=S.g.round;E.act(S,null,{k:'next'},true);pushState(R,`第 ${r} 日時間到，已自動結算`);changed=false}
       if(changed)pushState(R);
       if(S.phase==='play'){for(const id in R.pos)if(!S.g.alive[id]&&R.pos[id].gi>=0){R.pos[id].gi=-1;R.pos[id].seat=null;R.pos[id].act=null;R.dirty.add(id)}
         if(R.day!==S.g.round){R.day=S.g.round;R.env.books={};R.env.lockers={}}}                       // flipped books and letters last until the day ends
