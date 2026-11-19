@@ -18,14 +18,15 @@ TL=[('dark','3d',4,[(.3,1.8,'16 個人。','big'),(1.9,3.9,'誰在說謊？','bi
     ('shot2','3d',4,[(.2,2.9,'最後一分鐘','main')]),
     ('ghost','3d',4,[(.2,3.9,'出局了？化身幽靈看完全場','main')]),
     ('chase','ui',4,[(.2,3.9,'第二款：地鐵追捕','main'),(.5,3.9,'小偷對三隊警察，警隊裡藏著內鬼','sub')]),
-    ('results','3d',5,[(.4,4.9,'市民陣營獲勝！','main')]),
+    ('results','3d',8,[(.3,2.4,'市民陣營獲勝！','main'),(2.5,5.1,'但開場就被槍殺的小美……','main'),(3.1,5.1,'其實是狂熱分子：被殺正是她的目標，代幣拿最多','sub'),
+                        (5.3,7.9,'檢測出感染的小雨……','main'),(5.9,7.9,'竟是抗體保有者，連她自己都不知道','sub')]),
     ('end','end',6,[(.3,6,'暗線遊戲室','endtitle'),(.8,6,'今晚，找朋友來一局','endline'),(1.3,6,'anxian-game.onrender.com','endurl'),(1.6,6,'免下載・免註冊・6–16 人','endsmall')])]
 UI={'ui':['ui/idcard.png','ui/pick.png'],'chase':['ui/chase.png','ui/chase2.png']}
 def run(cmd):
     r=subprocess.run(cmd,capture_output=True,text=True)
     if r.returncode:print(' '.join(cmd)[:400]);print(r.stderr[-2500:]);sys.exit(1)
 def styles(W,H):
-    P=H>W;m=min(W,H)
+    P=H>W;m=min(W,H)*.75
     return {'big':dict(fs=int(m*.13),y='(h-text_h)/2',c='white'),
      'title':dict(fs=int(m*.14),y='(h-text_h)/2-%d'%int(m*.06),c='0xf1cf63'),
      'titlesub':dict(fs=int(m*.05),y='(h-text_h)/2+%d'%int(m*.08),c='white'),
@@ -38,7 +39,7 @@ def styles(W,H):
      'endsmall':dict(fs=int(m*.04),y='h*0.30+%d'%int(m*.43),c='0xdfe7ea')}
 def dt(i,cap,st,W=1280):
     a,b,text,sty=cap;s=st[sty]
-    if len(text)*s['fs']>W*.9 and not s.get('box'):                      # too wide for the frame: two lines, broken at the comma if there is one
+    if len(text)*s['fs']>W*.9 and not s.get('box') and sty!='endurl':                      # too wide for the frame: two lines, broken at the comma if there is one
         k=text.find('，')+1 if '，' in text else len(text)//2;l1,l2=text[:k],text[k:]
         s1=dict(s);s2=dict(s);s2['y']=f"({s['y']})+{int(s['fs']*1.3)}";st2=dict(st);st2['_1']=s1;st2['_2']=s2
         return dt(i,(a,b,l1,'_1'),st2,W)+','+dt(i,(a,b,l2,'_2'),st2,W)
@@ -77,13 +78,9 @@ def audio(total,out):
     for name,kind,sec,_ in TL:T.append((name,t));t+=sec
     at=dict(T)
     # (file, start in the video, from, length, volume, fade in, fade out)
-    P=[('music_brief',0,0,3.25,1.0,.5,.05),('sfx_gun',3.25,0,2.2,0.9,0,.4),
-       ('sfx_bell',at['title'],0,2.5,0.7,0,.5),('music_day',at['title'],0,at['ui']-at['title']+1,1.0,.3,1.0),
-       ('sfx_shuffle',at['ui'],0,1.5,0.8,0,.3),('music_lobby',at['ui']+.5,0,4,0.7,.5,.6),
-       ('music_urgent',at['scan'],0,at['ghost']-at['scan']-.6,1.0,.4,.4),('sfx_heartbeat',at['shot2']+.2,0,3.2,1.0,0,.3),
-       ('sfx_gun',at['shot2']+3.1,0,2.0,1.0,0,.4),('music_brief',at['ghost'],1.0,4.2,0.9,.6,.5),
-       ('music_chase_cop',at['chase'],0,4.2,1.0,.3,.4),('sfx_cheer',at['results']+.3,0,3,0.9,0,.6),
-       ('music_win_citizen',at['results'],0,total-at['results'],1.0,.3,1.2)]
+    P=[('music_day_long',0,0,total,1.0,1.2,2.5),
+       ('sfx_gun',3.25,0,1.6,0.45,0,.4),('sfx_heartbeat',at['shot2']+.6,0,2.6,0.4,.3,.5),('sfx_gun',at['shot2']+3.1,0,1.6,0.45,0,.4),
+       ('sfx_cheer',at['results']+.3,0,2.5,0.35,.1,.8)]
     inp=[];fl=[];lab=[]
     for k,(f,st,fr,ln,vol,fi,fo) in enumerate(P):
         inp+=['-i',f'audio/{f}.wav'];d=int(st*1000)

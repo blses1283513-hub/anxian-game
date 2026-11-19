@@ -489,7 +489,7 @@ window.Stage3D=(()=>{
       const rk=R&&(!alive||over)?(over&&g.roles[id]==='C'&&g.antibody===id?'AB':g.roles[id])+(over?'':'~'):'';   // the antibody is only shown with the results
       if(rk!==f.artKey){if(f.art){f.g.remove(f.art);freeTree(f.art)}f.art=null;f.artKey=rk;
         if(rk){const pi=S.players.findIndex(q=>q.id===id);f.artH=roleHuman(rk.replace('~',''),{ghost:!over,look:S.players[pi].look||A.LOOKS[pi%A.LOOKS.length][1]});f.art=f.artH.g;f.g.add(f.art);if(f.inkNear===false)for(const o of f.artH.inks)o.visible=false;f.pop=(fresh||still)?1:0;f.pivot.visible=false;f.gl.visible=false}else f.pivot.visible=true}
-      if(R&&(!alive||over)&&!f.role){f.role=label(R.n,'#f1cf63',.055,{depth:false});f.role.position.y=2.34;f.role.center.set(.5,-.6);f.g.add(f.role)}
+      if(R&&(!alive||over)&&!f.role&&!(CINE&&cineNoRole&&!over)){f.role=label(R.n,'#f1cf63',.055,{depth:false});f.role.position.y=2.34;f.role.center.set(.5,-.6);f.g.add(f.role)}
       const tgt=id!==me&&(ui.t===id&&ui.pick||ui.ft===id||(ui.armed&&ui.armed.t===id));f.ring.visible=tgt||(id===me&&(alive||over));f.bub.visible=!!speak[id]&&!f.art&&!CINE;f.ring.material.color.setHex(tgt?0xe2594c:0xe8a33d);
     }
     const roam=over&&api.roam,mine=figs[me]&&(roam||(g.alive[me]!==false&&S.phase==='play')),ghost=!!figs[me]&&S.phase==='play'&&g.alive[me]===false;
@@ -663,10 +663,11 @@ window.Stage3D=(()=>{
     if(!noDraw)renderer.render(scene,cam);
   }
   /* ---------- director mode (?cine=1), for promo videos: a fixed frame size, a placed camera, and one frame at a time on request ---------- */
-  const CINE=new URLSearchParams(location.search).get('cine')==='1';let cineCam=null,cineMarks=true,cineDim=null;
+  const CINE=new URLSearchParams(location.search).get('cine')==='1';let cineCam=null,cineMarks=true,cineDim=null,cineNoRole=false;
   api.cine={on:CINE,
     size(w,h){renderer.setPixelRatio(1);api.fill=true;el.style.width=w+'px';el.style.height=h+'px';renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix()},
-    cam(p,l,fov){cineCam=p?{p,l,fov}:null},marks(v){cineMarks=!!v},
+    cam(p,l,fov){cineCam=p?{p,l,fov}:null},marks(v){cineMarks=!!v},hideRoles(v){cineNoRole=!!v},
+    where(id){const f=figs[id];return f?[f.g.position.x,f.g.position.y,f.g.position.z]:null},
     flash(x,z,v){flash.position.set(x,1.6,z);flash.intensity=v==null?3:v},
     dim(v){if(!cineDim){cineDim=new T.Mesh(new T.PlaneGeometry(4,4),new T.MeshBasicMaterial({color:0x02040a,transparent:true,opacity:0,depthTest:false,depthWrite:false}));cineDim.position.z=-.2;cineDim.renderOrder=4;cam.add(cineDim);scene.add(cam)}cineDim.material.opacity=v;cineDim.visible=v>0},   // a dark room, as the camera sees it: seat marks (drawn later) stay on top
     step(t,dt){frame(t,dt||1/24);return renderer.domElement.toDataURL('image/jpeg',.92)}};
