@@ -34,16 +34,24 @@ window.Stage3D=(()=>{
   const api={el,onPos:null,onStop:null};
 
   const mats={};const mat=(c,o)=>{const k=c+JSON.stringify(o||0);if(mats[k])return mats[k];return mats[k]=new T.MeshLambertMaterial(Object.assign({color:c},o||{}))};   // cheap per-vertex lighting
-  const G={body:new T.CylinderGeometry(.26,.4,1.15,18),head:new T.SphereGeometry(.27,18,14),nose:new T.BoxGeometry(.1,.08,.14),arm:new T.BoxGeometry(.13,.56,.13),ring:new T.TorusGeometry(.56,.05,8,36),
+  const G={body:new T.CylinderGeometry(.26,.4,1.15,18),head:new T.SphereGeometry(.27,18,14),nose:new T.BoxGeometry(.1,.08,.14),arm:new T.BoxGeometry(.13,.56,.13),ring:new T.TorusGeometry(.56,.05,12,72),seat:new T.TorusGeometry(.4,.028,10,72),
     gun:Art.rbox(.09,.12,.3,.025,2),cup:Art.lathe([[0,0],[.06,0],[.08,.15],[.075,.16],[.065,.02],[0,.02]],18),box:Art.rbox(.16,.16,.16,.03,2),dot:new T.SphereGeometry(.06,8,6),
     st:new T.CylinderGeometry(.17,.17,.1,20),hit:new T.CylinderGeometry(.42,.42,.5,10),cop:new T.ConeGeometry(.18,.5,16),thief:new T.OctahedronGeometry(.19),
     loot:Art.rbox(.17,.17,.17,.035,2),mark:new T.TorusGeometry(.3,.035,8,28),sel:new T.TorusGeometry(.4,.05,8,32),reach:new T.TorusGeometry(.24,.03,8,24)};
   const ghost=new T.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false});
   const tex={};
-  function texOf(text,color,w){w=w||256;const k=text+color+w;let t=tex[k];if(!t){const c=document.createElement('canvas');c.width=w*2;c.height=128;const x=c.getContext('2d');      // drawn at twice the size so text stays sharp on phone screens
-      x.font='700 68px "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif';x.textAlign='center';x.textBaseline='middle';x.lineJoin='round';x.lineWidth=14;x.strokeStyle='rgba(11,20,26,.92)';x.strokeText(text,w,68);x.fillStyle=color;x.fillText(text,w,68);
+  // the seat mark: a filled circle (seats 1-8) or triangle (9-16) in the seat colour with the number inside; outline only = what you see in a dark room
+  function drawMark(x,cx,cy,r,n,outline){const m=A.seatMark(n);x.save();x.beginPath();
+    if(m.s==='tri'){x.moveTo(cx,cy-r*1.08);x.lineTo(cx+r*1.04,cy+r*.72);x.lineTo(cx-r*1.04,cy+r*.72);x.closePath()}else x.arc(cx,cy,r,0,Math.PI*2);
+    x.lineJoin='round';x.lineWidth=outline?9:10;x.strokeStyle=outline?'rgba(240,240,240,.95)':'rgba(11,20,26,.92)';x.stroke();
+    if(!outline){x.fillStyle=m.c;x.fill();x.fillStyle='#10161c';x.font='800 '+Math.round(r*(n>9?.95:1.15))+'px "Noto Sans TC",sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(String(n),cx,cy+(m.s==='tri'?r*.18:r*.04))}
+    x.restore()}
+  function markTex(n){const k='mk'+n;if(tex[k])return tex[k];const c=document.createElement('canvas');c.width=c.height=128;drawMark(c.getContext('2d'),64,66,44,n,true);const t=tex[k]=new T.CanvasTexture(c);t.anisotropy=4;return t}
+  function texOf(text,color,w,mk){w=w||256;const k=text+color+w+'|'+(mk||'');let t=tex[k];if(!t){const c=document.createElement('canvas');c.width=w*2;c.height=128;const x=c.getContext('2d');      // drawn at twice the size so text stays sharp on phone screens
+      let tx=w;if(mk){x.font='700 68px "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif';const tw=x.measureText(text).width,full=tw+112;tx=w+56;drawMark(x,w-full/2+48,64,46,mk,false)}
+      x.font='700 68px "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif';x.textAlign='center';x.textBaseline='middle';x.lineJoin='round';x.lineWidth=14;x.strokeStyle='rgba(11,20,26,.92)';x.strokeText(text,tx,68);x.fillStyle=color;x.fillText(text,tx,68);
       t=tex[k]=new T.CanvasTexture(c);t.anisotropy=4}return t}
-  function label(text,color,h,opt){const o=opt||{},w=o.w||256;const s=new T.Sprite(new T.SpriteMaterial({map:texOf(text,color,w),transparent:true,depthTest:!!o.depth,sizeAttenuation:!!o.atten}));s.scale.set(h*w/64,h,1);s.renderOrder=5;s.userData.free={m:1};return s}
+  function label(text,color,h,opt){const o=opt||{},w=o.w||256;const s=new T.Sprite(new T.SpriteMaterial({map:texOf(text,color,w,o.mark),transparent:true,depthTest:!!o.depth,sizeAttenuation:!!o.atten}));s.scale.set(h*w/64,h,1);s.renderOrder=5;s.userData.free={m:1};return s}
   const TEAMC=[0xe2594c,0x5c9eea,0x68ba6f],FAC={threat:0xe2594c,safe:0x52b8a8,neutral:0xab93dc};
   const wpos=s=>new T.Vector3((s.x-203)/40,0,(s.y-188)/40);
   // objects marked userData.free own their geometry (g), material (m) and/or texture (t); shared ones are left alone
@@ -60,10 +68,10 @@ window.Stage3D=(()=>{
   const glowM=new T.MeshBasicMaterial({vertexColors:true}),glowG=new T.MeshBasicMaterial({vertexColors:true,transparent:true,opacity:.7});
   const inkM=new T.MeshBasicMaterial({color:0x15181d,side:T.BackSide});inkM.onBeforeCompile=s=>{s.vertexShader=s.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n\ttransformed+=normalize(normal)*.014;')};
   const mixC=Art.mix,css=c=>Art.css(c);
-  const pg={};const SP=new T.SphereGeometry(1,14,10),SPt=new T.SphereGeometry(1,8,6),HEAD=new T.SphereGeometry(1,24,18),BX=Art.rbox(1,1,1,.12,1);   // SPt: small parts (buttons, ears, hands) need few faces
-  const cyl=(rt,rb,seg)=>{const k='c'+rt+'|'+rb+'|'+(seg||14);return pg[k]||(pg[k]=new T.CylinderGeometry(rt,rb,1,seg||14))};
-  const capG=th=>pg['h'+th]||(pg['h'+th]=new T.SphereGeometry(1,22,12,0,Math.PI*2,0,th));
-  const SPIKE=cyl(.04,1,6),BLUNT=cyl(.55,1,6),ARC=new T.TorusGeometry(1,.035,5,14,1.6);
+  const pg={};const SP=new T.SphereGeometry(1,28,20),SPt=new T.SphereGeometry(1,16,12),HEAD=new T.SphereGeometry(1,48,36),BX=Art.rbox(1,1,1,.12,3);   // SPt: small parts (buttons, ears, hands) need few faces
+  const cyl=(rt,rb,seg)=>{const n=Math.min(64,(seg||16)*2),k='c'+rt+'|'+rb+'|'+n;return pg[k]||(pg[k]=new T.CylinderGeometry(rt,rb,1,n))};   // twice the sides asked for: no visible facets up close
+  const capG=th=>pg['h'+th]||(pg['h'+th]=new T.SphereGeometry(1,44,24,0,Math.PI*2,0,th));
+  const tuft=(pts)=>new T.LatheGeometry(pts.map(q=>new T.Vector2(q[0],q[1])),28),SPIKE=tuft([[0,-.5],[.62,-.48],[.95,-.38],[1,-.24],[.84,-.02],[.56,.22],[.28,.4],[.1,.49],[0,.5]]),BLUNT=tuft([[0,-.5],[.7,-.48],[1,-.36],[1,-.1],[.9,.2],[.7,.42],[.4,.5],[0,.5]]),ARC=new T.TorusGeometry(1,.035,10,28,1.6),RING=new T.TorusGeometry(1,.32,16,48);
   // collects primitives (colour per vertex) into one geometry. Rotation order is yaw, then pitch, then roll.
   function Parts(){const P=[],N=[],C=[],I=[];let n=0;const m4=new T.Matrix4(),nm=new T.Matrix3(),v=new T.Vector3(),ps=new T.Vector3(),sc=new T.Vector3(),e=new T.Euler(0,0,0,'YXZ'),q=new T.Quaternion(),col=new T.Color();
     const me={count:()=>n,
@@ -96,14 +104,16 @@ window.Stage3D=(()=>{
     x.strokeStyle='rgba(120,60,50,.7)';x.lineWidth=2.5;x.beginPath();x.moveTo(126,182);x.lineTo(130,186);x.stroke();
     if(v!=='cloth'){x.strokeStyle='#8a3a3a';x.lineWidth=3.5;x.beginPath();x.moveTo(115,203);x.quadraticCurveTo(128,213,141,203);x.stroke()}
     const t=new T.CanvasTexture(c);t.anisotropy=4;return ftex[k]=t}
-  const FACE=new T.SphereGeometry(1,14,10,Math.PI/2-1,2,.9,1.45),fmat={};
+  const FACE=new T.SphereGeometry(1,32,24,Math.PI/2-1,2,.9,1.45),fmat={};
   const faceM=(t,gh)=>{const k=t.uuid+(gh?'g':'');return fmat[k]||(fmat[k]=new T.MeshToonMaterial({map:t,gradientMap:grad,transparent:true,opacity:gh?.7:1,depthWrite:false}))};
   // look = [sex, skin, hair style, hair colour, top colour, sleeve, bottom kind, bottom colour]
   // opt.role dresses the same person as that identity: T C AB R J I F (感染戰) or thief cop corrupt (地鐵追捕)
   function human(look,id,opt){
-    const o=opt||{},role=o.role||'',[sex,sk,hs,hc,tc,sl0,bt0,bc]=look,g=new T.Group(),gh=!!o.ghost;
+    const o=opt||{},role=o.role||'',L12=A.normLook(look),[sex,sk,hs,hc,tc,sl0,bt0,bc,acc,pat,ht,bd]=L12,g=new T.Group(),gh=!!o.ghost;
+    const bx=[.84,1,1.2][bd],tall=[.92,1,1.08][ht];g.scale.setScalar(tall);g.userData.tall=tall;          // build widens the body (not the head); height scales the whole person
     const skin=PAL.skin[sk],hair=PAL.hair[hc],hl=mixC(hair,.38,0xffffff),dk=0x1d2026,wh=0xf4f1ea,red=0xc0322a,gold=0xf1cf63;
-    let top=PAL.top[tc],bot=PAL.bot[bc],sl=sl0,bt=bt0,coat=0,hat='',fv='';
+    let top=PAL.top[tc],bot=PAL.bot[bc],sl=sl0,bt=bt0,coat=0,hat='',fv=!role&&acc===1?'glasses':'';
+    const lum=c=>((c>>16&255)*.3+(c>>8&255)*.59+(c&255)*.11)/255,pc=c=>lum(c)>.55?mixC(c,.55):mixC(c,.6,0xffffff);   // a pattern colour that stands out on the cloth
     if(role==='T'){top=0x23262c;bot=0x17191d;sl=1;bt=0;fv='cloth'}
     else if(role==='C'||role==='AB'){top=0x3f9d90;sl=1}
     else if(role==='R'){top=0xf2f2ee;sl=1;coat=.5;fv='glasses'}
@@ -112,10 +122,10 @@ window.Stage3D=(()=>{
     else if(role==='F'){top=0x5a2f8a;sl=1;coat=.12;hat='hood'}
     else if(role==='thief'){top=0xf2f2ee;bot=0x1d1d22;sl=1;bt=0;hat='beanie';fv='mask'}
     else if(role==='cop'||role==='corrupt'){top=o.color==null?0x2d5fae:o.color;bot=0x1b2c4a;sl=1;bt=0;hat='police';if(role==='corrupt')fv='cloth'}
-    const w=sex?.165:.19,ws=sex?.13:.16,hy=1.56,R=.3;
+    const w=(sex?.165:.19)*bx,ws=(sex?.13:.16)*bx*(bd===2?1.08:1),hy=1.56,R=.3;
     // the torso is a turned shape: hips, waist, chest and shoulders rounding into the neck
     const TP=sex?[[ws*.97,.74],[ws,.78],[ws*.88,.9],[w*.97,1.04],[w,1.11],[w*.9,1.18],[w*.55,1.225],[.06,1.245],[.05,1.25]]:[[ws*.98,.74],[ws,.78],[ws*.97,.9],[w*.98,1.04],[w,1.12],[w*.88,1.19],[w*.5,1.228],[.06,1.245],[.05,1.25]];
-    const torso=pg['t'+sex]||(pg['t'+sex]=new T.LatheGeometry(TP.map(q=>new T.Vector2(q[0],q[1])),22));
+    const tk='t'+sex+'|'+bd,torso=pg[tk]||(pg[tk]=new T.LatheGeometry(TP.map(q=>new T.Vector2(q[0],q[1])),48));
     const rAt=y=>{for(let i=1;i<TP.length;i++)if(y<=TP[i][1]){const a=TP[i-1],b=TP[i],f=(y-a[1])/(b[1]-a[1]);return a[0]+(b[0]-a[0])*Math.max(0,Math.min(1,f))}return TP[TP.length-1][0]};
     const inks=[],limb=par=>{const L={t:Parts(),e:Parts(),n:Parts(),par};L.done=()=>{
         if(L.n.count()){const m=new T.Mesh(L.n.geo(),gh?toonG:toonM);m.userData.free={g:1};if(id)m.userData.id=id;par.add(m)}
@@ -123,7 +133,7 @@ window.Stage3D=(()=>{
         if(L.e.count()){const m=new T.Mesh(L.e.geo(),gh?glowG:glowM);m.userData.free={g:1};par.add(m)}};return L};
     // legs
     const shoe=role?dk:bt===1?0xf0f0ee:bt===2?0x5a3a2a:0x24262c,sock=bt===2&&!role?(tc===5||tc===7?0x23262c:wh):wh;
-    const legs=[-1,1].map(sd=>{const G=new T.Group();G.position.set(sd*.1,.66,0);const L=limb(G),p=L.t;
+    const legs=[-1,1].map(sd=>{const G=new T.Group();G.position.set(sd*.1*bx,.66,0);G.scale.set(1+(bx-1)*.8,1,1+(bx-1)*.8);const L=limb(G),p=L.t;
       if(bt===0)p.add(cyl(.095,.078),bot,0,-.28,0,1,.56,1);
       else if(bt===1){p.add(cyl(.105,.1),bot,0,-.11,0,1,.22,1).add(cyl(.074,.062),skin,0,-.39,0,1,.34,1).add(cyl(.066,.064),sock,0,-.52,0,1,.09,1)}
       else p.add(cyl(.074,.064),skin,0,-.2,0,1,.4,1).add(cyl(.068,.063),sock,0,-.46,0,1,.24,1);
@@ -174,11 +184,22 @@ window.Stage3D=(()=>{
     if(role==='F')b.add(cyl(ws+.05,ws+.06),gold,0,.8,0,1,.03,.82).add(BX,gold,.06,.7,(ws+.06)*.82,.02,.2,.02);
     if(role==='thief'){for(const y of [.82,.94,1.06,1.17]){const r=rAt(y)+.003;b.add(cyl(r,r-.003),dk,0,y,0,1,.06,.78)}b.add(SP,0x8a6a3a,0,.98,-.27,.2,.24,.17).add(cyl(.05,.08),0x8a6a3a,0,1.24,-.25,1,.1,1)}
     if(role==='cop'||role==='corrupt'){b.add(SP,gold,-.08,1.07,z0(1.07)+.035,.03,.035,.012).add(cyl(ws+.03,ws+.03),0x15181c,0,.775,0,1,.04,.82)}
-    if(role==='AB'){B.e.add(new T.TorusGeometry(1,.1,6,24),0x7dffb0,0,hy+.5,0,.24,.24,.24,Math.PI/2,0,0).add(BX,0x7dffb0,0,1.02,z0(1.02)+.04,.16,.05,.012).add(BX,0x7dffb0,0,1.02,z0(1.02)+.04,.05,.16,.012)}
+    if(!role){const pcol=pc(top);
+      if(pat===1)for(const y of [.84,.95,1.06,1.16]){const r=rAt(y)+.004;b.add(cyl(r,r-.004,24),pcol,0,y,0,1,.045,.78)}                       // stripes
+      else if(pat===2){const yk='y'+sex+'|'+bd,yoke=pg[yk]||(pg[yk]=new T.LatheGeometry(TP.filter(q=>q[1]>=1.0).map(q=>new T.Vector2(q[0]*1.012,q[1])),48));b.add(yoke,pcol,0,0,0,1,1,.78)}   // a two-tone yoke over the shoulders
+      else if(pat===3){const y=1.04,zf=z0(y)+.012;b.add(SP,pcol,0,y,zf,.085,.085,.012).add(SP,top,0,y,zf+.006,.05,.05,.01).add(SP,pcol,0,y,zf+.011,.022,.022,.008)}   // a round print on the chest
+      const ac=PAL.top[(tc+4)%10];
+      if(acc===2){b.add(capG(1.4),ac,0,hy+.012,-.01,R*1.1,R*1.08,R*1.1,-.12,0,0).add(SP,ac,0,hy+.2,.25,.2,.024,.19,-.22,0,0).add(SP,pc(ac),0,hy+.33,-.02,.03)}            // a baseball cap
+      else if(acc===3){b.add(capG(1.3),ac,0,hy+.02,-.02,R*1.12,R*1.14,R*1.12,-.25,0,0).add(cyl(R*1.08,R*1.1,24),pc(ac),0,hy+.04,-.01,1,.06,1,-.25,0,0).add(SP,pc(ac),0,hy+.4,-.1,.065)}   // a knitted beanie with a pompom
+      else if(acc===4){const sc=PAL.top[(tc+6)%10];b.add(RING,sc,0,1.235,.005,.095*bx+.02,.09*bx+.02,.075,Math.PI/2,0,0).add(BX,sc,.07,1.08,z0(1.08)+.04,.07,.22,.03,.1,0,.12).add(BX,pc(sc),.07,.975,z0(.975)+.045,.072,.03,.032,.1,0,.12)}   // a scarf
+      else if(acc===5){const bc2=PAL.bot[(bc+3)%8];b.add(BX,bc2,0,1.0,-(ws*.78+.12),.3,.36,.16).add(BX,mixC(bc2,.25),0,.92,-(ws*.78+.205),.22,.14,.04);
+        for(const sd of [-1,1])b.add(BX,mixC(bc2,.35),sd*.085,1.11,z0(1.11)+.012,.032,.26,.014,0,0,sd*.08)}                                      // a backpack and its straps
+    }
+    if(role==='AB'){B.e.add(new T.TorusGeometry(1,.1,12,48),0x7dffb0,0,hy+.5,0,.24,.24,.24,Math.PI/2,0,0).add(BX,0x7dffb0,0,1.02,z0(1.02)+.04,.16,.05,.012).add(BX,0x7dffb0,0,1.02,z0(1.02)+.04,.05,.16,.012)}
     B.done();
     const face=new T.Mesh(FACE,faceM(faceTex(sex,EYE[hc],mixC(hair,hc===3||hc===5?.5:.25),fv),gh));face.position.set(0,hy,0);face.scale.set(R*1.012,R*.96*1.012,R*.97*1.012);if(id)face.userData.id=id;if(gh)face.renderOrder=1;g.add(face);
     // arms; the first one (the figure's right hand) carries whatever the identity holds
-    const arms=[-1,1].map((sd,ai)=>{const G=new T.Group();G.position.set(sd*(w+.045),1.14,0);const L=limb(G),p=L.t;
+    const arms=[-1,1].map((sd,ai)=>{const G=new T.Group();G.position.set(sd*(w+.045),1.14,0);G.scale.set(1+(bx-1)*.6,1,1+(bx-1)*.6);const L=limb(G),p=L.t;
       p.add(SP,top,0,0,0,.068);
       if(sl)p.add(cyl(.062,.05),top,0,-.2,0,1,.4,1).add(cyl(.055,.055),role||coat?mixC(top,.2):wh,0,-.41,0,1,.03,1);
       else p.add(cyl(.066,.064),top,0,-.08,0,1,.16,1).add(cyl(.05,.042),skin,0,-.3,0,1,.28,1);
@@ -220,7 +241,7 @@ window.Stage3D=(()=>{
   let signTex=null,boardTex=null;const bookTex={};          // pictures that never change between games are painted once
   function buildRoom(S){
     clear();const n=S.players.length,g=S.g;eo={books:{},flags:{},dark:{},plates:{},signs:[]};env={dark:[],books:[],lockers:[]};seated=false;prog=null;nearKey='';
-    const K=Art.kit(),P=Art.place,rb=(w,h,d,r,k)=>Art.rbox(w,h,d,r,Math.max(w,h,d)>1.2?Math.min(k||1,2):1),lathe=Art.lathe,SPH=Art.sphere(12,9),CYL=Art.cylinder(.5,.5,14);   // small pieces get one bevel step, big ones two
+    const K=Art.kit(),P=Art.place,rb=(w,h,d,r,k)=>Art.rbox(w,h,d,r,Math.max(w,h,d)>1.2?3:2),lathe=Art.lathe,SPH=Art.sphere(24,18),CYL=Art.cylinder(.5,.5,32);   // rounded edges get several bevel steps so corners read as smooth
     // static pieces are merged per material and per room, so a room out of view costs nothing and a room in view costs a few draw calls
     const MATS={wood:Art.lambert(K.wood),paint:Art.lambert(K.paint),fabric:Art.lambert(K.fabric),glow:new T.MeshBasicMaterial({vertexColors:true})},SC={wood:1.2,paint:1.5,fabric:.5,glow:1};
     const Bk={},near=(x,y)=>Math.min(1,.7+y*1.2);                                   // pieces get darker where they meet the floor
@@ -353,11 +374,15 @@ window.Stage3D=(()=>{
       for(const k in props){props[k].position.y=-.53;props[k].visible=false;arm.add(props[k])}props.gun.rotation.x=Math.PI/2;
       gg.add(pivot);
       const ring=own(new T.Mesh(G.ring,new T.MeshBasicMaterial({color:0xe8a33d})),0,1);ring.rotation.x=Math.PI/2;ring.position.y=.04;ring.visible=false;gg.add(ring);
-      const name=label((g.seat&&g.seat[p.id]?g.seat[p.id]+'號 ':'')+p.name,'#ece4d0',.06,{depth:true,w:448});name.position.y=2.34;gg.add(name);
+      const seatN=g.seat&&g.seat[p.id]?g.seat[p.id]:0,sc=seatN?A.seatMark(seatN).c:'#e8a33d';
+      const name=label((seatN?seatN+'號 ':'')+p.name,'#ece4d0',.06,{depth:true,w:512,mark:seatN||0});name.position.y=2.34;gg.add(name);
+      const cmk=own(new T.Sprite(new T.SpriteMaterial({map:texOf('','#ece4d0',64,seatN||i+1),transparent:true,depthTest:true,sizeAttenuation:false})),0,1);cmk.scale.set(.06,.06,1);cmk.position.y=2.34;cmk.visible=false;cmk.renderOrder=5;gg.add(cmk);
+      const dmk=own(new T.Sprite(new T.SpriteMaterial({map:markTex(seatN||i+1),transparent:true,depthTest:true,sizeAttenuation:false})),0,1);dmk.scale.set(.05,.05,1);dmk.position.y=2.3;dmk.visible=false;dmk.renderOrder=5;gg.add(dmk);   // dark room: only the outline of the seat mark
+      const sr=own(new T.Mesh(G.seat,new T.MeshBasicMaterial({color:new T.Color(sc),transparent:true,opacity:.9})),0,1);sr.rotation.x=Math.PI/2;sr.position.y=.03;gg.add(sr);             // a ring on the floor in the seat colour
       const gl=own(new T.Sprite(new T.SpriteMaterial({transparent:true,depthTest:true,sizeAttenuation:true})),0,1);gl.scale.set(2.2,.55,1);gl.position.set(0,2.95,0);gl.visible=false;gl.renderOrder=4;gg.add(gl);
       const sp=spawnOf(i,n);gg.position.set(sp.x,0,sp.z);gg.rotation.y=sp.r;root.add(gg);
       const bub=own(new T.Sprite(new T.SpriteMaterial({map:texOf('說話中','#8fe3ff'),transparent:true,depthTest:true,sizeAttenuation:true})),0,1);bub.scale.set(1.5,.375,1);bub.position.set(0,2.5,0);bub.visible=false;gg.add(bub);
-      figs[p.id]={g:gg,pivot,arm,arm2,legs:H.legs,inks:H.inks,inkNear:true,props,ring,gl,bub,name,dead:false,role:null,gi:-1,sp,art:null,artKey:'',shown:true,walk:0,lx:sp.x,lz:sp.z};
+      figs[p.id]={g:gg,pivot,arm,arm2,legs:H.legs,inks:H.inks,inkNear:true,props,ring,gl,bub,name,dmk,cmk,sr,dead:false,role:null,gi:-1,sp,art:null,artKey:'',shown:true,walk:0,lx:sp.x,lz:sp.z};
       peers[p.id]={x:sp.x,z:sp.z,r:sp.r,gi:-1,gt:''};
     });
     const Z=M.size+.6;mini.innerHTML=`<svg viewBox="${-Z} ${-Z} ${Z*2} ${Z*2}">${M.rooms.map(r=>`<rect data-r="${r.id}" class="${r.corr?'co':''}" x="${r.x0}" y="${r.z0}" width="${r.x1-r.x0}" height="${r.z1-r.z0}"/>${r.corr?'':`<text x="${(r.x0+r.x1)/2}" y="${(r.z0+r.z1)/2+1}">${r.n.slice(0,2)}</text>`}`).join('')}<circle r="1.2" cx="0" cy="0"/></svg>`;
@@ -380,10 +405,10 @@ window.Stage3D=(()=>{
       if(rk!==f.artKey){if(f.art){f.g.remove(f.art);freeTree(f.art)}f.art=null;f.artKey=rk;
         if(rk){const pi=S.players.findIndex(q=>q.id===id);f.artH=roleHuman(rk.replace('~',''),{ghost:!over,look:S.players[pi].look||A.LOOKS[pi%A.LOOKS.length][1]});f.art=f.artH.g;f.g.add(f.art);if(f.inkNear===false)for(const o of f.artH.inks)o.visible=false;f.pop=(fresh||still)?1:0;f.pivot.visible=false;f.gl.visible=false}else f.pivot.visible=true}
       if(R&&(!alive||over)&&!f.role){f.role=label(R.n,'#f1cf63',.055,{depth:false});f.role.position.y=2.34;f.role.center.set(.5,-.6);f.g.add(f.role)}
-      const tgt=id!==me&&(ui.t===id&&ui.pick||ui.ft===id);f.ring.visible=tgt||(id===me&&(alive||over));f.bub.visible=!!speak[id]&&!f.art;f.ring.material.color.setHex(tgt?0xe2594c:0xe8a33d);
+      const tgt=id!==me&&(ui.t===id&&ui.pick||ui.ft===id||(ui.armed&&ui.armed.t===id));f.ring.visible=tgt||(id===me&&(alive||over));f.bub.visible=!!speak[id]&&!f.art;f.ring.material.color.setHex(tgt?0xe2594c:0xe8a33d);
     }
-    const roam=over&&api.roam,mine=figs[me]&&(roam||(g.alive[me]!==false&&S.phase==='play'));
-    const walk=mine&&api.walk;stick.hidden=!walk;mini.hidden=over&&!roam;ctx.hidden=!walk||over;if(!walk)tip.textContent='拖曳畫面轉視角';
+    const roam=over&&api.roam,mine=figs[me]&&(roam||(g.alive[me]!==false&&S.phase==='play')),ghost=!!figs[me]&&S.phase==='play'&&g.alive[me]===false;
+    const walk=(mine||ghost)&&api.walk;stick.hidden=!walk;mini.hidden=over&&!roam;ctx.hidden=!walk||over||ghost;if(!walk)tip.textContent='拖曳畫面轉視角';
     if(!mine){if(gest)stopGesture(true);seated=false;prog=null}
     applyEnv();
   }
@@ -406,6 +431,12 @@ window.Stage3D=(()=>{
     return o}
   function stepRoom(dt,t){
     const S=cur.S,me=cur.me,g=S.g,play=S.phase==='play',mine=synced&&api.walk!==false&&figs[me]&&((play&&g.alive[me]!==false)||(S.phase==='over'&&api.roam)),now=Date.now();
+    const ghost=!mine&&api.walk!==false&&!!figs[me]&&play&&g.alive[me]===false&&me3.ok;
+    if(ghost){let jx=joy.x,jy=joy.y;if(keys.w||keys.arrowup)jy+=1;if(keys.s||keys.arrowdown)jy-=1;if(keys.a||keys.arrowleft)jx-=1;if(keys.d||keys.arrowright)jx+=1;
+      const m=Math.hypot(jx,jy);if(m>.12){const k=Math.min(1,m)/m,fx=Math.sin(camYaw),fz=Math.cos(camYaw),dx=(fx*jy-fz*jx)*k,dz=(fz*jy+fx*jx)*k;
+        const p=moveTo(me3.x,me3.z,me3.x+dx*SPEED*1.25*dt,me3.z+dz*SPEED*1.25*dt);me3.x=p[0];me3.z=p[1]}
+      if(now-nearT>200){nearT=now;const room=A.roomOf(me3.x,me3.z),rn=(M.rooms.find(r=>r.id===room)||{}).n||'';tip.textContent='你已出局，正在觀戰'+(rn?'・'+rn:'');
+        const c=mini.querySelector('circle');if(c){c.setAttribute('cx',me3.x.toFixed(1));c.setAttribute('cy',me3.z.toFixed(1));mini.querySelectorAll('rect').forEach(e=>e.classList.toggle('on',e.dataset.r===room))}}}
     if(mine){
       let jx=joy.x,jy=joy.y;if(keys.w||keys.arrowup)jy+=1;if(keys.s||keys.arrowdown)jy-=1;if(keys.a||keys.arrowleft)jx-=1;if(keys.d||keys.arrowright)jx+=1;
       const m=Math.hypot(jx,jy);
@@ -434,7 +465,7 @@ window.Stage3D=(()=>{
     for(const id in figs){const f=figs[id],p=peers[id];if(!p)continue;const self=id===me&&mine,vis=over||!p.hidden||id===me;
       if(f.shown!==vis){f.shown=vis;f.g.visible=vis}if(!vis)continue;
       if(!!f.lined!==over){f.lined=over;const nm=f.name,rl=f.role;nm.visible=true;nm.material.sizeAttenuation=over;nm.material.needsUpdate=true;        // in the line-up labels are part of the scene so they shrink with the figures
-        if(over){nm.scale.set(1.89,.27,1);nm.position.y=2.27}else{nm.scale.set(.42,.06,1);nm.position.y=2.34}
+        if(over){nm.scale.set(2.16,.27,1);nm.position.y=2.27}else{nm.scale.set(.48,.06,1);nm.position.y=2.34}if(f.dmk)f.dmk.visible=false;if(f.cmk)f.cmk.visible=false;if(f.sr)f.sr.visible=!over
         if(rl){rl.material.sizeAttenuation=over;rl.material.depthTest=over;rl.material.needsUpdate=true;if(over){rl.scale.set(1.36,.34,1);rl.center.set(.5,.5);rl.position.y=2.6}else{rl.scale.set(.22,.055,1);rl.center.set(.5,-.6);rl.position.y=2.34}}
         if(!f.step){f.step=own(new T.Mesh(Art.rbox(1.2,.08,.8,.035,2),new T.MeshLambertMaterial({color:0x4a3a2c})),0,1);f.step.position.y=-.045;f.g.add(f.step)}f.step.visible=over;if(!over){f.g.position.set(p.x,0,p.z);f.g.rotation.y=p.r}}
       if(over){const L=lineSpot(ids.indexOf(id),ids.length);f.g.position.set(L.x,L.y,L.z);f.g.rotation.y=0;f.gl.visible=false}
@@ -448,7 +479,8 @@ window.Stage3D=(()=>{
         if(lg){lg[0].rotation.x+=(sw-lg[0].rotation.x)*ka;lg[1].rotation.x+=(-sw-lg[1].rotation.x)*ka}continue}
       const gi=p.gi,dk=env.dark.length&&env.dark.includes(A.roomOf(f.g.position.x,f.g.position.z));
       if(gi!==f.gi){f.gi=gi;for(const k in f.props)f.props[k].visible=gi>=0&&GL[gi][2]===k;if(gi>=0){f.gl.material.map=texOf(GN[gi],'#ffe9a8');f.gl.material.needsUpdate=true}}
-      f.gl.visible=gi>=0&&!dk;f.name.visible=!dk;                          // in a dark room nobody can read what you are doing
+      const far=id!==me&&f.g.position.distanceToSquared(cam.position)>64;                 // past 8 m only the seat mark shows, so 16 name tags do not pile up
+      f.gl.visible=gi>=0&&!dk;f.name.visible=!dk&&!far;f.cmk.visible=!dk&&far;f.dmk.visible=!!dk;f.sr.visible=!dk;     // in a dark room nobody can read what you are doing: only the outline of the seat mark shows
       let ax=0,az=0,bow=0,sit=0;
       if(gi>=0){const L=GL[gi],w=still?0:t/1000;ax=-L[0];
         if(L[1]==='thrust')ax+=Math.sin(w*6)*.3;else if(L[1]==='clink')az=Math.sin(w*4)*.25;else if(L[1]==='rps')ax+=Math.sin(w*8)*.55;else if(L[1]==='pat')ax+=Math.sin(w*14)*.14;
@@ -529,7 +561,7 @@ window.Stage3D=(()=>{
   let qMode=(()=>{try{return localStorage.getItem('ax_q')||'auto'}catch(e){return'auto'}})();
   const qLevel=()=>qMode==='auto'?qLv:({high:0,mid:1,low:2}[qMode]||0);
   function applyQ(){const dpr=window.devicePixelRatio||1,lv=qLevel();
-    renderer.setPixelRatio(pxq>0?Math.max(.25,Math.min(2,pxq)):lv===0?Math.min(dpr,2):lv===1?Math.min(dpr,1.3):Math.min(dpr,1)*.85);
+    renderer.setPixelRatio(pxq>0?Math.max(.25,Math.min(2,pxq)):lv===0?Math.min(dpr,2.5):lv===1?Math.min(dpr,1.5):Math.min(dpr,1)*.85);
     inkM.visible=lv<2;inkD2=lv===0?90:30;Art.setAniso(lv===0?Math.min(8,renderer.capabilities.getMaxAnisotropy()):lv===1?4:1);size(true)}
   function quality(t){
     if(!qT0||t-qT0>4500){qT0=t;qN=0;return}qN++;const e=t-qT0;if(e<2500)return;const fps=qN*1000/e;qT0=t;qN=0;

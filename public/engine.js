@@ -10,7 +10,7 @@ const GAMES={
   chase:{name:'地鐵追捕',min:5,max:14,ds:'小偷在路線圖上隱藏移動收集贓物，三隊警察調查與逮捕，隊裡藏著內鬼。'}
 };
 function newState(game,hostId,code){return{v:1,code,game,hostId,phase:'lobby',players:[],kicked:{},
-  opts:{deathDelay:2,rounds:5,roundMin:'std',lootGoal:6,maxRounds:15,verify:'3d',knowMates:0,novice:0,briefSec:60},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
+  opts:{deathDelay:2,rounds:5,roundMin:'std',lootGoal:6,maxRounds:12,stageSec:45,verify:'3d',knowMates:0,novice:0,briefSec:60,pw:''},groups:[],ack:{},pub:[],priv:{},chat:[],g:null,result:null}}
 /* day lengths: 'std' = the standard schedule, day 1 to 5; a number = the same length every day */
 const SCHED=[8,10,10,5,3];
 const dayMin=(S,r)=>S.opts.roundMin==='std'?SCHED[Math.min(Math.max(r||1,1),SCHED.length)-1]:+S.opts.roundMin||12;
@@ -27,10 +27,12 @@ function act(S,pid,a,isHost){
   if(a.k==='say'){
     const t=String(a.text||'').trim().slice(0,200),v=S.phase==='play'&&S.game==='virus';
     if(!t)return'沒有內容';if(!S.players.some(p=>p.id===pid))return'你不在名單內';
-    if(v&&!S.g.alive[pid])return'死者不能發言';
     let to=a.to||'';
+    if(to==='#ghost'){if(!v||S.g.alive[pid])return'只有出局的人能用幽靈頻道'}
+    else if(v&&!S.g.alive[pid])return'死者只能在幽靈頻道發言';
     if(to==='#team'){if(!(S.phase!=='lobby'&&S.game==='chase'&&S.g&&S.g.roles[pid]))return'對象無效';to=S.g.roles[pid]==='thief'?'#th':'#t'+S.g.team[pid]}
-    else if(to.startsWith('#g')){const G=(S.groups||[]).find(x=>x.id===to);if(!G||!G.m.includes(pid))return'你不在這個群組'}
+    else if(to.startsWith('#g')&&to!=='#ghost'){const G=(S.groups||[]).find(x=>x.id===to);if(!G||!G.m.includes(pid))return'你不在這個群組'}
+    else if(to==='#ghost'){}
     else if(to&&(to===pid||!S.players.some(p=>p.id===to)||(v&&!S.g.alive[to])))return'對象無效';
     S.chatN=(S.chatN||0)+1;(S.chat=S.chat||[]).push({i:S.chatN,f:pid,to,t,r:S.g?S.g.round:0});if(S.chat.length>150)S.chat.shift();return}
   if(a.k==='grp'||a.k==='grpinv'||a.k==='grpleave'){
@@ -53,13 +55,19 @@ function act(S,pid,a,isHost){
     if(!a.v){g.offer.no=true;pub(S,'有人不同意提前結束，遊戲照常進行。');return}
     g.offer.yes[pid]=1;if(S.players.every(p=>!g.alive[p.id]||g.offer.yes[p.id])){pub(S,'存活玩家全數同意，提前結束。');S.sim=true;let n=0;while(S.phase==='play'&&n++<20)vNext(S);delete S.sim}
     return}
-  if(a.k==='look'){if(S.phase!=='lobby')return'遊戲開始後不能換造型';const p=S.players.find(p=>p.id===pid);if(!p)return'你不在名單內';if(!okLook(a.look))return'造型資料不正確';p.look=a.look.slice();return}
+  if(a.k==='look'){if(S.phase!=='lobby')return'遊戲開始後不能換造型';const p=S.players.find(p=>p.id===pid);if(!p)return'你不在名單內';if(!okLook(a.look))return'造型資料不正確';p.look=normLook(a.look);return}
   if(['opt','game','start','next','again','kick','add'].includes(a.k)){
     if(!isHost)return'只有房主可以操作';
+    if(a.k==='kick'&&S.phase!=='lobby'){if(!S.players.some(p=>p.id===a.t)||a.t===pid)return'對象無效';S.kicked[a.t]=1;
+      if(S.phase==='over'){S.players=S.players.filter(p=>p.id!==a.t);if(S.again)delete S.again[a.t];rematch(S);return}
+      if(S.phase==='play'&&S.game==='virus'&&S.g.alive[a.t]){vKill(S,a.t,'被房主移出');vCheck(S)}
+      else if(S.phase==='play'&&S.game==='chase'){pub(S,`${nm(S,a.t)} 被房主移出，之後由系統代為原地不動`);if(cActive(S).every(id=>S.g.done[id]))cAdvance(S)}
+      return}
     if(a.k==='next'){if(S.phase!=='play')return'遊戲未在進行';if(S.game==='chase'&&S.g.briefEnd)return briefDone(S);return S.game==='virus'?vNext(S):cAdvance(S,true)}
     if(a.k==='again'){S.phase='lobby';S.g=null;S.result=null;S.again={};S.pub=[];S.priv={};S.chat=[];S.groups=[];return}
     if(S.phase!=='lobby')return'遊戲已開始';
-    if(a.k==='opt'){const ok={deathDelay:[1,2],roundMin:['std',5,10,12,15,30],lootGoal:[5,6,7],verify:['3d','none'],knowMates:[0,1],novice:[0,1]}[a.o];if(!ok||!ok.includes(a.v))return'不支援的設定';S.opts[a.o]=a.v;
+    if(a.k==='opt'&&a.o==='pw'){const v=String(a.v==null?'':a.v);if(v&&!/^\d{4}$/.test(v))return'密碼要是 4 位數字';S.opts.pw=v;return}
+    if(a.k==='opt'){const ok={deathDelay:[1,2],roundMin:['std',5,10,12,15,30],lootGoal:[5,6,7],maxRounds:[10,12,15],verify:['3d','none'],knowMates:[0,1],novice:[0,1]}[a.o];if(!ok||!ok.includes(a.v))return'不支援的設定';S.opts[a.o]=a.v;
       if(a.o==='novice'&&a.v)S.opts.knowMates=1;if(a.o==='knowMates'&&!a.v)S.opts.novice=0;return}
     if(a.k==='game'){if(!GAMES[a.v])return'沒有這款遊戲';S.game=a.v;return}
     if(a.k==='kick'){S.players=S.players.filter(p=>p.id!==a.t);S.kicked[a.t]=1;return}
@@ -122,14 +130,21 @@ function walkable(x,z,m){m=m==null?.45:m;
 const blocked=(x,z)=>MAP.obs.some(o=>Math.hypot(x-o.x,z-o.z)<o.r+.38);
 const spawnOf=(i,n)=>{const a=i/n*Math.PI*2;return{x:MAP.table.x+Math.sin(a)*3.6,z:MAP.table.z+Math.cos(a)*3.6,r:a+Math.PI}};
 /* ---------- avatars: 20 presets (10 male, 10 female); every part can be changed ---------- */
-// look = [sex 0/1, skin 0-4, hair style 0-7, hair colour 0-7, top colour 0-9, sleeve 0 short/1 long, bottom 0 trousers/1 shorts/2 skirt, bottom colour 0-7]
-const LOOK_MAX=[1,4,7,7,9,1,2,7];
+// look = [sex 0/1, skin 0-4, hair style 0-7, hair colour 0-7, top colour 0-9, sleeve 0 short/1 long, bottom 0 trousers/1 shorts/2 skirt, bottom colour 0-7,
+//         accessory 0 none/1 glasses/2 cap/3 beanie/4 scarf/5 backpack, pattern 0 plain/1 stripes/2 two-tone/3 chest print, height 0 short/1/2 tall, build 0 slim/1/2 sturdy]
+const LOOK_MAX=[1,4,7,7,9,1,2,7,5,3,2,2],LOOK_DEF=[0,0,0,0,0,0,0,0,0,0,1,1];
+const normLook=l=>Array.isArray(l)?LOOK_DEF.map((d,i)=>l[i]==null?d:l[i]):LOOK_DEF.slice();
 const LOOKS=[
-  ['短髮藍襯衫',[0,1,0,0,0,1,0,0]],['平頭運動風',[0,2,1,0,2,0,1,1]],['側分西裝',[0,0,2,1,7,1,0,0]],['捲髮紅帽T',[0,3,7,0,1,1,0,2]],['金髮夏日',[0,1,0,3,4,0,1,3]],
-  ['灰髮紳士',[0,0,2,5,8,1,0,4]],['黑膚街頭',[0,4,1,0,5,0,0,0]],['棕髮綠毛衣',[0,2,0,2,3,1,0,2]],['染髮潮流',[0,1,7,6,9,0,1,0]],['長髮文青',[0,0,3,1,6,1,0,5]],
-  ['長直髮洋裝',[1,0,3,0,1,0,2,2]],['馬尾運動',[1,1,4,2,2,0,1,1]],['鮑伯頭上班',[1,0,5,0,7,1,0,0]],['丸子頭粉色',[1,1,6,1,9,1,2,6]],['金色長髮',[1,0,3,3,4,0,1,3]],
-  ['捲髮黃上衣',[1,3,7,0,4,1,0,0]],['短髮帥氣',[1,2,0,0,5,1,0,0]],['黑膚馬尾',[1,4,4,0,0,0,2,4]],['紫髮個性',[1,1,5,7,6,0,1,0]],['棕髮毛衣裙',[1,2,6,2,3,1,2,5]]];
-const okLook=l=>Array.isArray(l)&&l.length===8&&l.every((v,i)=>Number.isInteger(v)&&v>=0&&v<=LOOK_MAX[i]);
+  ['短髮藍襯衫',[0,1,0,0,0,1,0,0,0,0,1,1]],['平頭棒球帽',[0,2,1,0,2,0,1,1,2,1,2,1]],['眼鏡西裝',[0,0,2,1,7,1,0,0,1,0,2,0]],['背包印花T',[0,3,7,0,1,1,0,2,5,3,1,2]],['金髮條紋',[0,1,0,3,4,0,1,3,0,1,0,1]],
+  ['灰髮圍巾紳士',[0,0,2,5,8,1,0,4,4,0,1,2]],['毛帽街頭',[0,4,1,0,5,0,0,0,3,2,2,1]],['眼鏡綠毛衣',[0,2,0,2,3,1,0,2,1,1,1,0]],['染髮背包客',[0,1,7,6,9,0,1,0,5,2,0,0]],['圍巾文青',[0,0,3,1,6,1,0,5,4,3,1,1]],
+  ['長直髮洋裝',[1,0,3,0,1,0,2,2,0,0,1,0]],['馬尾棒球帽',[1,1,4,2,2,0,1,1,2,1,1,1]],['眼鏡鮑伯頭',[1,0,5,0,7,1,0,0,1,0,2,0]],['丸子頭印花',[1,1,6,1,9,1,2,6,0,3,0,1]],['金髮圍巾',[1,0,3,3,4,0,1,3,4,0,1,2]],
+  ['捲髮背包',[1,3,7,0,4,1,0,0,5,2,0,1]],['毛帽短髮',[1,2,0,0,5,1,0,0,3,0,2,1]],['黑膚拼色裙',[1,4,4,0,0,0,2,4,0,2,1,0]],['紫髮眼鏡',[1,1,5,7,6,0,1,0,1,1,0,2]],['圍巾毛衣裙',[1,2,6,2,3,1,2,5,4,3,2,1]]];
+const okLook=l=>Array.isArray(l)&&(l.length===8||l.length===12)&&l.every((v,i)=>Number.isInteger(v)&&v>=0&&v<=LOOK_MAX[i]);
+/* every seat gets its own colour and shape: 8 colours that colour-blind players can still tell apart, circles for seats 1-8 and triangles for 9-16 */
+const SEATC=['#e69f00','#56b4e9','#2fbf8f','#f0e442','#3d8bff','#e8622a','#d98ec0','#e9e9e9'];
+const seatMark=n=>({c:SEATC[(Math.max(1,n)-1)%8],s:n>8?'tri':'dot'});
+// how alike two looks are, counting what you notice from across a room (0-9)
+const lookLike=(a,b)=>{a=normLook(a);b=normLook(b);return[0,2,3,4,6,8,9,10,11].filter(i=>a[i]===b[i]).length+(a[7]===b[7]?.5:0)};
 const VSK={T:['infect','shoot','antidote'],I:['shoot'],J:['check'],R:['research']};
 const SKN={infect:'投放病毒',shoot:'開槍',antidote:'解毒劑',check:'查驗身分',research:'製藥'};
 const vTask=(S,pid,k)=>{const t=S.g.task&&S.g.task[pid];return t&&t[k]!=null?TASKS[t[k]]:null};
@@ -277,7 +292,7 @@ const TEAMS=['紅隊','藍隊','綠隊'];
 function cComp(n){const th=n>=8?2:1,cops=n-th,teams=cops>=6?3:cops>=4?2:1,cor=cops>=9?2:cops>=4?1:0;return{th,cops,teams,cor}}
 function cDeal(S){
   const ids=shuffle(S.players.map(p=>p.id)),c=cComp(ids.length);
-  const g=S.g={round:1,stage:'thief',order:[],roles:{},team:{},pos:{},trail:{x:0},loot:{x:0},got:0,arrested:{x:0},arrestBy:{x:0},budget:{},done:{x:0},marks:{},accuse:{x:0}};
+  const g=S.g={round:1,stage:'thief',stageEnd:0,order:[],roles:{},team:{},pos:{},trail:{x:0},loot:{x:0},got:0,arrested:{x:0},arrestBy:{x:0},budget:{},done:{x:0},marks:{},accuse:{x:0}};
   for(let i=0;i<c.teams;i++){g.order.push(i);g.marks['t'+i]=[]}
   const th=ids.slice(0,c.th),cops=ids.slice(c.th);
   th.forEach(id=>g.roles[id]='thief');
@@ -292,20 +307,19 @@ function cDeal(S){
   pub(S,g.briefEnd?`身分已發下。小偷是 ${th.map(id=>nm(S,id)).join('、')}。請在 ${S.opts.briefSec} 秒內閱讀自己的身分說明，時間到後第 1 回合開始。`:`小偷是 ${th.map(id=>nm(S,id)).join('、')}。第 1 回合開始，小偷先行動。`);
 }
 /* the identity briefing is over: the game proper starts */
-function briefDone(S){const g=S.g;if(!g||!g.briefEnd)return;if(S.game==='virus')return vNext(S);g.briefEnd=0;pub(S,'身分確認結束。第 1 回合開始，小偷先行動。')}
-function cActive(S){const g=S.g,all=S.players.map(p=>p.id);
+function briefDone(S){const g=S.g;if(!g||!g.briefEnd)return;if(S.game==='virus')return vNext(S);g.briefEnd=0;cClock(S);pub(S,'身分確認結束。第 1 回合開始，小偷先行動。')}
+function cClock(S){const g=S.g;g.stageEnd=S.opts.stageSec>0&&!g.briefEnd?Date.now()+S.opts.stageSec*1000:0}
+function cActive(S){const g=S.g,all=S.players.map(p=>p.id).filter(id=>!S.kicked[id]);
   if(g.stage==='thief')return all.filter(id=>g.roles[id]==='thief'&&!g.arrested[id]);
-  const t=g.order[g.stage];return all.filter(id=>g.roles[id]!=='thief'&&g.team[id]===t)}
-function cSetup(S){const g=S.g;g.done={x:0};g.budget={};cActive(S).forEach(id=>g.budget[id]={m:2,a:2})}
-function cStageName(S){const g=S.g;return g.stage==='thief'?'小偷':TEAMS[g.order[g.stage]]}
-function cAdvance(S,forced){
+  return all.filter(id=>g.roles[id]!=='thief')}                                  // every police team moves at the same time
+function cSetup(S){const g=S.g;g.done={x:0};g.budget={};cActive(S).forEach(id=>g.budget[id]={m:2,a:2});cClock(S)}
+function cStageName(S){return S.g.stage==='thief'?'小偷':'警察'}
+function cAdvance(S,forced,depth){
   const g=S.g;
-  if(g.stage==='thief')g.stage=0;else g.stage++;
-  if(g.stage>=g.order.length){
-    if(g.round>=S.opts.maxRounds){cFinish(S,'none',`${S.opts.maxRounds} 回合用盡`);return}
-    g.round++;g.order.push(g.order.shift());g.stage='thief';pub(S,`第 ${g.round} 回合開始，小偷先行動`);
-  }
-  cSetup(S);if(!cActive(S).length)cAdvance(S);
+  if(g.stage==='thief')g.stage='cops';
+  else{if(g.round>=S.opts.maxRounds){cFinish(S,'none',`${S.opts.maxRounds} 回合用盡`);return}
+    g.round++;g.stage='thief';pub(S,`第 ${g.round} 回合開始，小偷先行動`)}
+  cSetup(S);if(!cActive(S).length&&(depth||0)<40)cAdvance(S,forced,(depth||0)+1);
 }
 function cAct(S,pid,a){
   const g=S.g,role=g.roles[pid];if(!role)return'你不在本局';
@@ -352,7 +366,8 @@ function redact(S,pid){
   const V=clone(S);delete V.ack;V.priv={};if(S.priv[pid])V.priv[pid]=S.priv[pid];
   const g=S.g,over=S.phase==='over',mine=(S.groups||[]).filter(G=>G.m.includes(pid)),gids=mine.map(G=>G.id);
   let tk='';if(g&&S.game==='chase'&&g.roles[pid])tk=g.roles[pid]==='thief'?'#th':'#t'+g.team[pid];
-  V.groups=mine;V.chat=(S.chat||[]).filter(m=>!m.to||m.f===pid||m.to===pid||gids.includes(m.to)||(tk&&m.to===tk));
+  const ghost=S.game==='virus'&&!!g&&(S.phase==='over'||g.alive[pid]===false);                       // the ghost channel: only the dead, and everyone after the game
+  V.groups=mine;V.chat=(S.chat||[]).filter(m=>!m.to||m.f===pid||m.to===pid||gids.includes(m.to)||(tk&&m.to===tk)||(m.to==='#ghost'&&ghost));
   if(!g||over)return V;
   const v=V.g,role=g.roles[pid];
   if(S.game==='virus'){
@@ -373,6 +388,6 @@ function redact(S,pid){
   return V;
 }
 
-const AX={SCHED,dayMin,vScan,practice,LOOKS,LOOK_MAX,MAP,roomOf,isHall,sees,walkable,blocked,spawnOf,briefDone,GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,vUse,ST,ADJ,LINES,TEAMS,cActive,cStageName,redact,clone,rnd};
+const AX={normLook,seatMark,SEATC,lookLike,cClock,SCHED,dayMin,vScan,practice,LOOKS,LOOK_MAX,MAP,roomOf,isHall,sees,walkable,blocked,spawnOf,briefDone,GAMES,newState,act,nm,VR,GN,TASKS,VSK,SKN,vTask,vComp,cComp,vTeam,vUse,ST,ADJ,LINES,TEAMS,cActive,cStageName,redact,clone,rnd};
 if(typeof module!=='undefined'&&module.exports)module.exports=AX;else window.AX=AX;
 })();

@@ -64,6 +64,7 @@ function voiceList(R){const list=[...R.voice].filter(id=>R.cl.has(id));for(const
 function voiceOff(R,pid){if(R.voice&&R.voice.delete(pid))voiceList(R)}
 function mayTalk(R,a,b){const S=R.S,inList=id=>S.players.some(p=>p.id===id);if(!inList(a)||!inList(b))return false;
   if(S.phase==='play'&&S.game==='chase'){const g=S.g,ch=id=>g.roles[id]==='thief'?'th':'t'+g.team[id];return ch(a)===ch(b)}
+  if(S.phase==='play'&&S.game==='virus'&&S.g)return(S.g.alive[a]!==false)===(S.g.alive[b]!==false)
   return true}
 /* ---- rooms ---- */
 // someone left the after-game room: drop them, and if everybody still here had agreed, the next game starts
@@ -81,7 +82,8 @@ const roomOfP=q=>E.roomOf(q.x,q.z);
 const near=(q,o,d)=>Math.hypot(q.x-o.x,q.z-o.z)<=d;
 const viewRoom=(R,pid)=>R.pos[pid]?roomOfP(R.pos[pid]):'round';
 /* A player only receives the positions of people they could see: the same room, or hall to hall. 0 = out of sight. */
-function posFor(R,pid,ids){const all=R.S.phase==='over',vr=viewRoom(R,pid),p={};
+const ghostOf=(R,pid)=>R.S.phase==='play'&&R.S.game==='virus'&&!!R.S.g&&R.S.g.alive[pid]===false;
+function posFor(R,pid,ids){const all=R.S.phase==='over'||ghostOf(R,pid),vr=viewRoom(R,pid),p={};
   for(const id of ids){const q=R.pos[id];if(!q)continue;
     p[id]=(all||id===pid||E.sees(vr,roomOfP(q)))?[+q.x.toFixed(2),+q.z.toFixed(2),+q.r.toFixed(2),q.gi,q.gt]:0}
   return p}
@@ -101,7 +103,7 @@ function onMsg(c,m){
   if(m.t==='create'){
     const pid=clean(m.pid);if(pid.length<6)return;
     let code;do{code=Array.from({length:4},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ'[crypto.randomInt(24)]).join('')}while(rooms.has(code));
-    const S=E.newState(E.GAMES[m.game]?m.game:'virus',pid,code);if(BRIEF!==null)S.opts.briefSec=BRIEF;S.players.push({id:pid,name:clean(m.name)||'房主',look:E.LOOKS[0][1].slice()});
+    const S=E.newState(E.GAMES[m.game]?m.game:'virus',pid,code);if(BRIEF!==null)S.opts.briefSec=BRIEF;if(process.env.STAGE_SECONDS)S.opts.stageSec=+process.env.STAGE_SECONDS;/* STAGE_SECONDS: tests only */S.players.push({id:pid,name:clean(m.name)||'房主',look:E.LOOKS[0][1].slice()});
     const R={S,cl:new Map(),pos:{},dirty:new Set(),last:Date.now(),keys:{},voice:new Set()};R.keys[pid]=String(m.key||'');rooms.set(code,R);bind(c,R,pid);pushState(R);return}
   if(m.t==='practice'){                                                          // a private room for practising the actions
     const pid=clean(m.pid);if(pid.length<6)return;
@@ -115,9 +117,10 @@ function onMsg(c,m){
     if(!R){wsSend(c.sock,{t:'err',m:'找不到這個房間，可能已經結束了',fatal:1});return}
     const S=R.S,inList=S.players.some(p=>p.id===pid),key=String(m.key||'');
     if(R.keys[pid]!==undefined&&R.keys[pid]!==key){wsSend(c.sock,{t:'err',m:'這個座位屬於另一台裝置',fatal:1});return}
+    if(S.kicked[pid]){wsSend(c.sock,{t:'err',m:'你已被房主移出這個房間',fatal:1});return}
+    if(!inList&&S.opts.pw&&String(m.pw||'')!==S.opts.pw){wsSend(c.sock,{t:'err',m:m.pw?'密碼不對':'這個房間需要密碼',pw:1,code:S.code});return}
     R.keys[pid]=key;
     if(!inList&&S.phase==='lobby'){
-      if(S.kicked[pid]){wsSend(c.sock,{t:'err',m:'你已被房主移出這個房間',fatal:1});return}
       const e=E.act(S,null,{k:'add',id:pid,name:clean(m.name)||'玩家'},true);
       if(e){wsSend(c.sock,{t:'err',m:'這個房間已經滿了（16 人）',fatal:1});return}}
     bind(c,R,pid);pushState(R);wsSend(c.sock,{t:'voice',list:[...R.voice].filter(id=>R.cl.has(id)),ice:ICE});
@@ -135,7 +138,7 @@ function onMsg(c,m){
     if(a.k==='add'){wsSend(c.sock,{t:'err',m:'連線模式不能手動加人'});return}
     const was=S.phase,e=E.act(S,pid,a,host);
     if(e){wsSend(c.sock,{t:'err',m:e});return}
-    if(a.k==='kick'){const k=R.cl.get(a.t);if(k){wsSend(k.sock,{t:'gone',m:'你被房主移出房間'});R.cl.delete(a.t);k.room=null}voiceOff(R,a.t)}
+    if(a.k==='kick'){if(R.pos[a.t]&&S.game==='virus'){const q=R.pos[a.t];q.gi=-1;q.seat=null;q.act=null;R.dirty.add(a.t)}const k=R.cl.get(a.t);if(k){wsSend(k.sock,{t:'gone',m:'你被房主移出房間'});R.cl.delete(a.t);k.room=null}voiceOff(R,a.t)}
     if(was!=='play'&&S.phase==='play'&&S.game==='virus'){spawn(R);pushState(R);for(const [id,k] of R.cl){k.vroom=viewRoom(R,id);k.vphase=S.phase;sendAllPos(R,k,1)}return}
     pushState(R);return}
   if(process.env.TEST_HOOKS&&m.t==='dbg'&&m.ab&&S.g){wsSend(c.sock,{t:'dbgab',id:S.g.antibody||''});return}                      // tests only: who carries the antibody
@@ -187,6 +190,7 @@ setInterval(()=>{
     const S=R.S;
     if(now-R.last>3*3600e3){rooms.delete(code);continue}
     if(S.phase==='play'&&S.g&&S.g.briefEnd&&now>=S.g.briefEnd){E.briefDone(S);pushState(R)}
+    if(S.phase==='play'&&S.game==='chase'&&S.g&&!S.g.briefEnd&&S.g.stageEnd&&now>=S.g.stageEnd){const nmS=E.cStageName(S);E.act(S,null,{k:'next'},true);pushState(R,`${nmS}的時間到，換下一段`)}
     if(S.phase==='over'){R.away=R.away||{};
       for(const p of S.players.slice()){if(R.cl.has(p.id)){delete R.away[p.id];continue}R.away[p.id]=R.away[p.id]||now;if(now-R.away[p.id]>AWAY_MS){afterQuit(R,p.id);if(S.phase!=='over')break}}}
     else if(R.away)R.away=null;
@@ -227,7 +231,7 @@ setInterval(()=>{
     if(S.game==='virus'&&S.g&&R.env&&S.phase!=='lobby'){
       if(S.phase==='over'&&Object.keys(R.env.dark).length)R.env.dark={};                              // lights back on for the after-game walk
       for(const [pid,c] of R.cl){const vr=viewRoom(R,pid);
-        if(c.vroom!==vr||c.vphase!==S.phase){c.vroom=vr;c.vphase=S.phase;sendAllPos(R,c,0)}           // entered another room: what is visible changes
+        const gh=ghostOf(R,pid);if(c.vroom!==vr||c.vphase!==S.phase||c.vghost!==gh){c.vroom=vr;c.vphase=S.phase;c.vghost=gh;sendAllPos(R,c,0)}           // entered another room: what is visible changes
         else if(R.dirty.size)wsSend(c.sock,{t:'pos',p:posFor(R,pid,R.dirty)});
         const e=JSON.stringify({dark:Object.keys(R.env.dark),books:vr==='library'?Object.keys(R.env.books).map(Number):null,lockers:vr==='locker'?Object.keys(R.env.lockers).map(Number):null});
         if(e!==c.envS){c.envS=e;wsSend(c.sock,Object.assign({t:'env'},JSON.parse(e)))}}
