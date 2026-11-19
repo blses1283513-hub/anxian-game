@@ -367,7 +367,7 @@ function lookHtml(){
   const sw=(i,arr,label)=>`<div class="row"><span class="sub lk">${label}</span>${arr.map((c,v)=>`<button class="swatch ${L[i]===v?'on':''}" data-a="lookset" data-i="${i}" data-v="${v}" style="background:${hex(c)}" aria-label="${label} ${v+1}"></button>`).join('')}</div>`;
   const ch=(i,names,label)=>`<div class="row"><span class="sub lk">${label}</span>${names.map((n,v)=>`<button class="btn sm ${L[i]===v?'on':''}" data-a="lookset" data-i="${i}" data-v="${v}">${n}</button>`).join('')}</div>`;
   return`<section class="panel"><h3>你的造型</h3>
-    <div class="lookrow"><img class="lookbig" src="${thumb(L,132,176)}" alt="目前的造型">
+    <div class="lookrow"><div class="lookbig" id="lookpv"><img src="${thumb(L,132,176)}" alt="目前的造型" style="width:100%;height:100%"></div>
       <div class="lookgrid">${LOOKS.map(([n,l],i)=>`<button class="lookbtn ${l.join('')===key?'on':''}" data-a="lookpreset" data-v="${i}" title="${n}" aria-label="${n}"><img src="${thumb(l,60,80)}" alt=""></button>`).join('')}</div></div>
     <p class="sub">前兩排是 10 種男性、後兩排是 10 種女性。選一個之後還可以微調配件、花紋、身高和胖瘦。所有人都看得到你的造型。</p>
     <details ${ui.lookOpen?'open':''}><summary data-a="looktoggle">微調造型</summary><div class="stack lookopts">
@@ -710,6 +710,7 @@ function render(){
   const nsd=document.getElementById('side');if(nsd&&nsd.dataset.tab===sdTab)nsd.scrollTop=sdTop;
   const slot=document.getElementById('stage-slot');
   if(Stage3D)Stage3D.walk=mode==='net'&&!isBrief();
+  {const pv=document.getElementById('lookpv');if(pv&&Stage3D&&Stage3D.preview)Stage3D.preview(pv,myLook())}
   if(slot&&Stage3D&&S&&S.g)Stage3D.attach(slot,S,me,ui,(kind,id)=>{if(kind==='virus'){if(id===me)return;if(ui.pick&&ui.pick.targets.includes(id))H.target(id);else if(mode==='net'&&S.opts.verify==='3d'&&S.phase==='play'&&!isBrief()&&S.g.alive[id]!==false&&S.g.alive[me]){ui.ft=id;ui.fakeOpen=true;if(gsOn())ui.tab='id';render()}}else H.st(id)});
   if(Stage3D)Stage3D.setHud(stageHud());
   const nmg=document.getElementById('msgs');if(nmg)nmg.scrollTop=stick?nmg.scrollHeight:otop;

@@ -67,9 +67,13 @@ window.Stage3D=(()=>{
   const toonM=new T.MeshToonMaterial({vertexColors:true,gradientMap:grad}),toonG=new T.MeshToonMaterial({vertexColors:true,gradientMap:grad,transparent:true,opacity:.62});
   const glowM=new T.MeshBasicMaterial({vertexColors:true}),glowG=new T.MeshBasicMaterial({vertexColors:true,transparent:true,opacity:.7});
   const inkM=new T.MeshBasicMaterial({color:0x15181d,side:T.BackSide});inkM.onBeforeCompile=s=>{s.vertexShader=s.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n\ttransformed+=normalize(normal)*.014;')};
+  // arms and legs are skinned: the skin bends smoothly at the elbow and the knee instead of two tubes meeting
+  const toonSk=toonM.clone();toonSk.skinning=true;const toonGSk=toonG.clone();toonGSk.skinning=true;
+  const inkSk=new T.MeshBasicMaterial({color:0x15181d,side:T.BackSide,skinning:true});inkSk.onBeforeCompile=inkM.onBeforeCompile;
   const mixC=Art.mix,css=c=>Art.css(c);
   const pg={};const SP=new T.SphereGeometry(1,28,20),SPt=new T.SphereGeometry(1,16,12),HEAD=new T.SphereGeometry(1,48,36),BX=Art.rbox(1,1,1,.12,3);   // SPt: small parts (buttons, ears, hands) need few faces
   const cyl=(rt,rb,seg)=>{const n=Math.min(64,(seg||16)*2),k='c'+rt+'|'+rb+'|'+n;return pg[k]||(pg[k]=new T.CylinderGeometry(rt,rb,1,n))};   // twice the sides asked for: no visible facets up close
+  const tubeG=(rt,rb)=>{const k='tb'+rt+'|'+rb;return pg[k]||(pg[k]=new T.CylinderGeometry(rt,rb,1,16,8))};   // enough rings along the length to bend smoothly
   const capG=th=>pg['h'+th]||(pg['h'+th]=new T.SphereGeometry(1,44,24,0,Math.PI*2,0,th));
   const tuft=(pts)=>new T.LatheGeometry(pts.map(q=>new T.Vector2(q[0],q[1])),28),SPIKE=tuft([[0,-.5],[.62,-.48],[.95,-.38],[1,-.24],[.84,-.02],[.56,.22],[.28,.4],[.1,.49],[0,.5]]),BLUNT=tuft([[0,-.5],[.7,-.48],[1,-.36],[1,-.1],[.9,.2],[.7,.42],[.4,.5],[0,.5]]),ARC=new T.TorusGeometry(1,.035,10,28,1.6),RING=new T.TorusGeometry(1,.32,16,48);
   // collects primitives (colour per vertex) into one geometry. Rotation order is yaw, then pitch, then roll.
@@ -127,19 +131,34 @@ window.Stage3D=(()=>{
     const TP=sex?[[ws*.97,.74],[ws,.78],[ws*.88,.9],[w*.97,1.04],[w,1.11],[w*.9,1.18],[w*.55,1.225],[.06,1.245],[.05,1.25]]:[[ws*.98,.74],[ws,.78],[ws*.97,.9],[w*.98,1.04],[w,1.12],[w*.88,1.19],[w*.5,1.228],[.06,1.245],[.05,1.25]];
     const tk='t'+sex+'|'+bd,torso=pg[tk]||(pg[tk]=new T.LatheGeometry(TP.map(q=>new T.Vector2(q[0],q[1])),48));
     const rAt=y=>{for(let i=1;i<TP.length;i++)if(y<=TP[i][1]){const a=TP[i-1],b=TP[i],f=(y-a[1])/(b[1]-a[1]);return a[0]+(b[0]-a[0])*Math.max(0,Math.min(1,f))}return TP[TP.length-1][0]};
-    const inks=[],limb=par=>{const L={t:Parts(),e:Parts(),n:Parts(),par};L.done=()=>{
-        if(L.n.count()){const m=new T.Mesh(L.n.geo(),gh?toonG:toonM);m.userData.free={g:1};if(id)m.userData.id=id;par.add(m)}
-        if(L.t.count()){const geo=L.t.geo(),m=new T.Mesh(geo,gh?toonG:toonM);m.userData.free={g:1};if(id)m.userData.id=id;par.add(m);if(!gh){const ol=new T.Mesh(geo,inkM);if(id)ol.userData.id=id;par.add(ol);inks.push(ol)}}
-        if(L.e.count()){const m=new T.Mesh(L.e.geo(),gh?glowG:glowM);m.userData.free={g:1};par.add(m)}};return L};
+    const inks=[],limb=(par,oy)=>{const L={t:Parts(),e:Parts(),n:Parts(),par},o=oy||0;L.done=()=>{
+        if(L.n.count()){const m=new T.Mesh(L.n.geo(),gh?toonG:toonM);m.position.y=o;m.userData.free={g:1};if(id)m.userData.id=id;par.add(m)}
+        if(L.t.count()){const geo=L.t.geo(),m=new T.Mesh(geo,gh?toonG:toonM);m.position.y=o;m.userData.free={g:1};if(id)m.userData.id=id;par.add(m);if(!gh){const ol=new T.Mesh(geo,inkM);ol.position.y=o;if(id)ol.userData.id=id;par.add(ol);inks.push(ol)}}
+        if(L.e.count()){const m=new T.Mesh(L.e.geo(),gh?glowG:glowM);m.position.y=o;m.userData.free={g:1};par.add(m)}};return L};
+    // a skinned limb: three bones (shoulder/hip, elbow/knee, wrist/ankle); build() draws the sleeve or trouser leg hanging down from 0,
+    // end() draws the hand or the shoe in the last bone's own space, into the same skinned mesh (one draw call per limb);
+    // extra() is for things held in the hand that glow (identity props), as their own meshes on the last bone
+    const skinLimb=(par,j1,j2,build,end,extra)=>{const P2=Parts();build(P2);
+      const off={add(geo,c,x,y,z,...r){P2.add(geo,c,x,(y||0)+j2,z,...r);return off}};end(off);
+      const geo=P2.geo(),pos=geo.attributes.position,n=pos.count,si=new Uint16Array(n*4),sw=new Float32Array(n*4),bw=.05,bw2=.018,sm=(a,b,y)=>{const t=Math.max(0,Math.min(1,(a-y)/(a-b)));return t*t*(3-2*t)};
+      for(let i=0;i<n;i++){const y=pos.getY(i),k1=sm(j1+bw,j1-bw,y),k2=sm(j2+bw2,j2-bw2,y);si[i*4+1]=1;si[i*4+2]=2;sw[i*4]=1-k1;sw[i*4+1]=k1*(1-k2);sw[i*4+2]=k1*k2}
+      geo.setAttribute('skinIndex',new T.Uint16BufferAttribute(si,4));geo.setAttribute('skinWeight',new T.Float32BufferAttribute(sw,4));
+      const b0=new T.Bone(),b1=new T.Bone(),b2=new T.Bone();b1.position.y=j1;b2.position.y=j2-j1;b0.add(b1);b1.add(b2);
+      const m=new T.SkinnedMesh(geo,gh?toonGSk:toonSk);m.add(b0);par.add(m);m.updateMatrixWorld(true);const sk=new T.Skeleton([b0,b1,b2]);m.bind(sk);m.frustumCulled=false;m.userData.free={g:1};if(id)m.userData.id=id;
+      if(!gh){const ol=new T.SkinnedMesh(geo,inkSk);par.add(ol);ol.bind(sk,m.bindMatrix);ol.frustumCulled=false;if(id)ol.userData.id=id;inks.push(ol)}
+      if(extra){const E=limb(b2);extra(E.t,E);E.done()}return{G:par,b0,b1,b2}};
+    // the skeleton above the legs: hips (moves up and down), spine (bends at the hip joints), head (turns at the neck)
+    const hips=new T.Group(),spine=new T.Group(),head=new T.Group();spine.position.y=.66;head.position.y=1.27-.66;g.add(hips);hips.add(spine);spine.add(head);
     // legs
     const shoe=role?dk:bt===1?0xf0f0ee:bt===2?0x5a3a2a:0x24262c,sock=bt===2&&!role?(tc===5||tc===7?0x23262c:wh):wh;
-    const legs=[-1,1].map(sd=>{const G=new T.Group();G.position.set(sd*.1*bx,.66,0);G.scale.set(1+(bx-1)*.8,1,1+(bx-1)*.8);const L=limb(G),p=L.t;
-      if(bt===0)p.add(cyl(.095,.078),bot,0,-.28,0,1,.56,1);
-      else if(bt===1){p.add(cyl(.105,.1),bot,0,-.11,0,1,.22,1).add(cyl(.074,.062),skin,0,-.39,0,1,.34,1).add(cyl(.066,.064),sock,0,-.52,0,1,.09,1)}
-      else p.add(cyl(.074,.064),skin,0,-.2,0,1,.4,1).add(cyl(.068,.063),sock,0,-.46,0,1,.24,1);
-      p.add(SP,shoe,0,-.605,.035,.082,.058,.135);L.done();g.add(G);return G});
+    const legs=[-1,1].map(sd=>{const G=new T.Group();G.position.set(sd*.1*bx,.66,0);G.scale.set(1+(bx-1)*.8,1,1+(bx-1)*.8);hips.add(G);
+      return skinLimb(G,-.3,-.575,p=>{
+        if(bt===0)p.add(tubeG(.096,.085),bot,0,-.15,0,1,.32,1).add(SPt,bot,0,-.3,0,.084,.06,.084).add(tubeG(.082,.068),bot,0,-.44,0,1,.29,1);
+        else if(bt===1)p.add(tubeG(.106,.1),bot,0,-.11,0,1,.22,1).add(tubeG(.077,.068),skin,0,-.2,0,1,.2,1).add(SPt,skin,0,-.3,0,.068,.05,.068).add(tubeG(.066,.056),skin,0,-.43,0,1,.27,1).add(tubeG(.062,.059),sock,0,-.52,0,1,.11,1);
+        else p.add(tubeG(.078,.068),skin,0,-.15,0,1,.3,1).add(SPt,skin,0,-.3,0,.067,.05,.067).add(tubeG(.066,.057),skin,0,-.37,0,1,.15,1).add(tubeG(.063,.058),sock,0,-.47,0,1,.22,1)},
+        p=>p.add(SP,shoe,0,-.03,.035,.082,.058,.135).add(SPt,mixC(shoe,.35),0,-.075,.035,.074,.012,.122))});
     // body and head
-    const B=limb(g),b=B.t;
+    const B=limb(spine,-.66),HD=limb(head,-1.27),hd=y=>y>=1.32,b={add(geo,c,x,y,...r){(hd(y)?HD.t:B.t).add(geo,c,x,y,...r);return b}},bn={add(geo,c,x,y,...r){(hd(y)?HD.n:B.n).add(geo,c,x,y,...r);return bn}},be={add(geo,c,x,y,...r){(hd(y)?HD.e:B.e).add(geo,c,x,y,...r);return be}};
     if(bt===2&&!coat){b.add(cyl(.15,.34,14),bot,0,.6,0,1,.3,.9).add(cyl(.336,.348,14),mixC(bot,.3,0xffffff),0,.468,0,1,.035,.9)}
     else if(bt!==2){b.add(cyl(ws+.012,ws+.024),bot,0,.7,0,1,.13,.8);if(bt===0)b.add(cyl(ws+.018,ws+.018),dk,0,.765,0,1,.032,.8).add(BX,gold,0,.765,(ws+.018)*.8,.04,.03,.012)}
     b.add(torso,top,0,0,0,1,1,.78).add(cyl(.05,.056),skin,0,1.26,0,1,.13,1);
@@ -158,7 +177,7 @@ window.Stage3D=(()=>{
     const nape=()=>{for(const a of [Math.PI-.55,Math.PI,Math.PI+.55])spike(a,2.0,.15,.09)};
     if(hat!=='hood'){
       if(hs===1){capH(R*1.035,1.38,-.45);fringe([-.8,-.4,0,.4,.8],.07)}
-      else{capH(R*1.06,1.5,-.5);B.n.add(ARC,hl,0,hy+.225,.01,.238,.238,.238,Math.PI/2,-(Math.PI/2-.8),0)}
+      else{capH(R*1.06,1.5,-.5);bn.add(ARC,hl,0,hy+.225,.01,.238,.238,.238,Math.PI/2,-(Math.PI/2-.8),0)}
       if(hs===0){fringe([-.78,-.4,0,.4,.78],.16);spike(-1.3,1.5,.17,.08);spike(1.3,1.5,.17,.08);nape();b.add(SPIKE,hair,.02,hy+.36,.03,.03,.14,.03,.5,0,-.5)}
       else if(hs===2){fringe([-.8,-.42,-.05,.32],.17,.5);spike(.72,1.36,.27,.085,.12);spike(-1.3,1.5,.16,.08);nape()}
       else if(hs===3){fringe([-.8,-.48,-.16,.16,.48,.8],.14,0,BLUNT);b.add(SP,hair,0,hy-.3,-.2,.275,.44,.1).add(SP,hair,-.265,hy-.22,.05,.05,.3,.075).add(SP,hair,.265,hy-.22,.05,.05,.3,.075)}
@@ -195,36 +214,102 @@ window.Stage3D=(()=>{
       else if(acc===5){const bc2=PAL.bot[(bc+3)%8];b.add(BX,bc2,0,1.0,-(ws*.78+.12),.3,.36,.16).add(BX,mixC(bc2,.25),0,.92,-(ws*.78+.205),.22,.14,.04);
         for(const sd of [-1,1])b.add(BX,mixC(bc2,.35),sd*.085,1.11,z0(1.11)+.012,.032,.26,.014,0,0,sd*.08)}                                      // a backpack and its straps
     }
-    if(role==='AB'){B.e.add(new T.TorusGeometry(1,.1,12,48),0x7dffb0,0,hy+.5,0,.24,.24,.24,Math.PI/2,0,0).add(BX,0x7dffb0,0,1.02,z0(1.02)+.04,.16,.05,.012).add(BX,0x7dffb0,0,1.02,z0(1.02)+.04,.05,.16,.012)}
-    B.done();
-    const face=new T.Mesh(FACE,faceM(faceTex(sex,EYE[hc],mixC(hair,hc===3||hc===5?.5:.25),fv),gh));face.position.set(0,hy,0);face.scale.set(R*1.012,R*.96*1.012,R*.97*1.012);if(id)face.userData.id=id;if(gh)face.renderOrder=1;g.add(face);
+    if(role==='AB'){be.add(new T.TorusGeometry(1,.1,12,48),0x7dffb0,0,hy+.5,0,.24,.24,.24,Math.PI/2,0,0).add(BX,0x7dffb0,0,1.02,z0(1.02)+.04,.16,.05,.012).add(BX,0x7dffb0,0,1.02,z0(1.02)+.04,.05,.16,.012)}
+    B.done();HD.done();
+    const face=new T.Mesh(FACE,faceM(faceTex(sex,EYE[hc],mixC(hair,hc===3||hc===5?.5:.25),fv),gh));face.position.set(0,hy-1.27,0);face.scale.set(R*1.012,R*.96*1.012,R*.97*1.012);if(id)face.userData.id=id;if(gh)face.renderOrder=1;head.add(face);
     // arms; the first one (the figure's right hand) carries whatever the identity holds
-    const arms=[-1,1].map((sd,ai)=>{const G=new T.Group();G.position.set(sd*(w+.045),1.14,0);G.scale.set(1+(bx-1)*.6,1,1+(bx-1)*.6);const L=limb(G),p=L.t;
-      p.add(SP,top,0,0,0,.068);
-      if(sl)p.add(cyl(.062,.05),top,0,-.2,0,1,.4,1).add(cyl(.055,.055),role||coat?mixC(top,.2):wh,0,-.41,0,1,.03,1);
-      else p.add(cyl(.066,.064),top,0,-.08,0,1,.16,1).add(cyl(.05,.042),skin,0,-.3,0,1,.28,1);
-      if(role==='thief'&&sl)for(const y of [-.1,-.24,-.36])p.add(cyl(.064,.06),dk,0,y,0,1,.05,1);
-      p.add(SPt,skin,0,-.47,0,.056);
-      if(role&&ai===0){const y=-.52;
+    let rolePose=null;
+    const arms=[-1,1].map((sd,ai)=>{const G=new T.Group();G.position.set(sd*(w+.045),1.14-.66,0);G.scale.set(1+(bx-1)*.6,1,1+(bx-1)*.6);spine.add(G);
+      const cuff=role||coat?mixC(top,.2):wh;
+      return skinLimb(G,-.22,-.43,p=>{p.add(SPt,top,0,0,0,.068);
+        if(sl)p.add(tubeG(.064,.056),top,0,-.11,0,1,.22,1).add(SPt,top,0,-.22,0,.056,.05,.056).add(tubeG(.056,.05),top,0,-.32,0,1,.2,1).add(tubeG(.055,.054),cuff,0,-.415,0,1,.032,1);
+        else p.add(tubeG(.069,.064),top,0,-.07,0,1,.15,1).add(tubeG(.052,.047),skin,0,-.15,0,1,.16,1).add(SPt,skin,0,-.22,0,.048,.045,.048).add(tubeG(.047,.04),skin,0,-.32,0,1,.21,1);
+        if(role==='thief'&&sl)for(const y of [-.1,-.24,-.36])p.add(tubeG(.066,.062),dk,0,y,0,1,.05,1)},
+      p=>p.add(SPt,skin,0,-.05,.004,.047,.06,.036).add(SPt,skin,-sd*.014,-.028,.03,.018,.03,.017,-.5,0,0),       // a mitten hand and its thumb
+      role&&ai===0?(p,L)=>{{const y=-.09;
         if(role==='T'){p.add(SP,0x111315,0,y-.1,.02,.13).add(cyl(.02,.02,6),0xd9c48a,0,y+.05,.02,1,.1,1);L.e.add(SP,0xff8a2a,0,y+.11,.02,.04)}
         else if(role==='R'){p.add(cyl(.035,.035,10),0xcfe9ef,0,y+.02,.02,1,.12,1);L.e.add(cyl(.045,.12,12),0x6fe08a,0,y-.11,.02,1,.16,1)}
         else if(role==='I'||role==='cop')p.add(BX,0x15181c,0,y-.03,.08,.05,.09,.22);
         else if(role==='F'){p.add(cyl(.035,.035,10),0xf2ecd8,0,y+.04,.02,1,.26,1);L.e.add(SP,0xffb347,0,y+.21,.02,.04,.06,.04)}
         else if(role==='corrupt')p.add(BX,0x4fbf6a,0,y-.02,.05,.2,.03,.11).add(BX,0x6fdc8a,0,y+.01,.05,.2,.03,.11,0,.3,0);
         else if(role==='J')p.add(BX,wh,0,y-.02,.04,.13,.17,.015).add(BX,0x9aa4a8,0,y+.05,.05,.1,.012,.016);
-        G.rotation.x=role==='T'||role==='thief'?-.35:role==='C'||role==='AB'?-2.7:-1.05}
-      L.done();g.add(G);return G});
-    return{g,arms,legs,inks};
+        rolePose=role==='T'||role==='thief'?{sx:-.25,e:-.35}:role==='C'||role==='AB'?{sx:-2.55,e:-.3}:{sx:-.55,e:-1.05}}}:null)});
+    return{g,hips,spine,head,arms,legs,inks,rolePose,sd:[-1,1]};
   }
   function roleHuman(key,opt){const o=opt||{};return human(o.look||A.LOOKS[key==='thief'?2:0][1],null,{role:key,ghost:o.ghost,color:o.color})}
-  function roleFigure(key,opt){return roleHuman(key,opt).g}
+  function roleFigure(key,opt){const H=roleHuman(key,opt);rigPose(H,{w:0,ph:0,t:0,gi:-1,mode:''},10);return H.g}
+  /* ---------- body language: a pose (hips, spine, head, both arms, both legs) eased towards a target, with the walk cycle laid on top ----------
+     signs: spine sx > 0 bends forward; arm ax < 0 lifts the arm forward, az swings it out to the side (right arm -, left arm +), ae < 0 bends the elbow;
+     leg lx < 0 lifts the thigh forward, lk > 0 bends the knee; the ankle keeps the foot flat on its own */
+  const REST={hy:0,hx:0,sx:0,sy:0,sz:0,nx:0,ny:0,a0x:0,a0z:-.09,a0e:-.14,a0w:0,a1x:0,a1z:.09,a1e:-.14,a1w:0,l0x:0,l0k:0,l1x:0,l1k:0};
+  // what each of the 12 actions does with the body (right arm = a0); ph = seconds, for the moving ones
+  const GPOSE=[
+    (P)=>{P.a0x=-.35;P.a0z=-.6;P.a0e=-1.75;P.sy=-.12;P.ny=-.25},                                                           // 挽手臂: hook your arm
+    (P)=>{P.a0x=-2.05;P.a0z=-.18;P.a0e=-.45;P.a0w=.35;P.sz=.05;P.ny=-.1},                                                 // 搭肩: hand on the shoulder
+    (P)=>{P.a0x=-1.55;P.a0z=.1;P.a0e=-.04;P.a1x=-1.3;P.a1z=-.32;P.a1e=-.8;P.sy=.12;P.ny=-.08},                            // 比槍: arm out, the other hand steadies it
+    (P)=>{P.a0x=-1.12;P.a0z=.12;P.a0e=-.55;P.a1x=-1.12;P.a1z=-.12;P.a1e=-.55;P.sx=.08;P.nx=.12},                          // 遞東西: both hands forward
+    (P,ph)=>{P.sx=.62+.06*Math.sin(ph*3);P.nx=.25;P.a0x=-.58;P.a1x=-.58;P.a0e=-.08;P.a1e=-.08;P.a0z=-.04;P.a1z=.04},       // 鞠躬: bend at the waist
+    (P,ph)=>{P.a0x=-.95;P.a0e=-1.0+.45*Math.sin(ph*8);P.a0w=.3*Math.sin(ph*8);P.a1x=-.3;P.a1e=-.7;P.nx=.08},               // 猜拳: the forearm pumps
+    (P,ph)=>{P.a0x=-1.42;P.a0z=-.25;P.a0e=-.35;P.a0w=.5*Math.sin(ph*14);P.ny=-.12},                                       // 拍背: the wrist pats
+    (P)=>{P.hy=-.17;P.l0x=-1.45;P.l1x=-1.45;P.l0k=1.45;P.l1k=1.45;P.a0x=-.55;P.a1x=-.55;P.a0e=-.8;P.a1e=-.8;P.sx=-.06},   // 坐下: knees at a right angle, hands on the thighs
+    (P,ph)=>{P.a0x=-2.3;P.a0z=-.1;P.a0e=-.35;P.a0w=.4*Math.sin(ph*3);P.nx=-.25;P.a1x=-.2},                                // 倒放書本: reach up to the shelf
+    (P,ph)=>{P.a0x=-1.25+.25*Math.sin(ph*6);P.a0e=-.35;P.nx=.1},                                                           // 投信: push the letter in
+    (P,ph)=>{P.a0x=-1.05;P.a0e=-.95;P.a0w=.45+.25*Math.sin(ph*4);P.a1x=-.65;P.a1e=-1.2;P.nx=.15},                          // 倒茶: tip the pot, the other hand holds the cup
+    (P)=>{P.a0x=-1.95;P.a0z=-.15;P.a0e=-.5;P.a0w=-.3;P.nx=-.1}];                                                           // 關燈: flip the switch
+  // o = {w: walking 0..1, ph: stride phase, t: seconds, gi: action or -1, mode: ''|ghost|cheer|slump, look: head yaw towards a speaker or null, talk}
+  function rigPose(R,o,dt){
+    const c=R.cur||(R.cur=Object.assign({},REST)),sd=R.seed==null?(R.seed=Math.random()*60):R.seed,t=o.t+sd,live=still?0:1,idle=live*(1-Math.min(1,o.w*1.4)),P=Object.assign({},REST);
+    // standing still is never quite still: breathing, the weight moving from foot to foot, a look around
+    const sh=Math.sin(t*.37);
+    P.sx=.022*Math.sin(t*1.6)*idle;P.sz=.035*sh*idle;P.hx=.02*sh*idle;
+    P.a0x=.045*Math.sin(t*1.6+.6)*idle;P.a1x=.045*Math.sin(t*1.6+1.1)*idle;P.a0e-=.05*idle*Math.max(0,Math.sin(t*.9));P.a1e-=.05*idle*Math.max(0,Math.sin(t*.9+2));
+    P.l0k=.13*idle*Math.max(0,sh);P.l1k=.13*idle*Math.max(0,-sh);P.l0x=-P.l0k*.45;P.l1x=-P.l1k*.45;
+    P.ny=o.look!=null?o.look:.4*idle*Math.sin(t*.21)*Math.sin(t*.13+1);P.nx=.05*Math.sin(t*.5)*idle;
+    if(o.talk)P.nx+=.06*Math.sin(o.t*9)*live;
+    if(R.rolePose){P.a0x=R.rolePose.sx;P.a0e=R.rolePose.e}
+    if(o.mode==='ghost'){P.hy=.14+.06*Math.sin(t*1.3)*live;P.a0x=P.a1x=-.3;P.a0e=P.a1e=-.55;P.a0z=-.38;P.a1z=.38;P.l0x=-.25;P.l1x=.08;P.l0k=.45;P.l1k=.3;P.nx=.18}
+    else if(o.mode==='cheer'){const j=Math.abs(Math.sin(t*4))*live;P.hy=.06*j;P.a0x=P.a1x=-2.75;P.a0z=-.38;P.a1z=.38;P.a0e=P.a1e=-.25-.4*j;P.nx=-.18;P.l0k=P.l1k=.3*(1-j);P.l0x=P.l1x=-.12*(1-j)}
+    else if(o.mode==='slump'){P.sx=.2;P.nx=.42;P.a0z=-.03;P.a1z=.03;P.a0e=P.a1e=-.04;P.ny=0}
+    if(o.gi>=0&&GPOSE[o.gi])GPOSE[o.gi](P,live?o.t:0);
+    const k=1-Math.exp(-dt*(o.gi>=0?9:7));for(const key in P)c[key]+=(P[key]-c[key])*k;   // ease every joint towards its target: no snapping between poses
+    // the walk: thighs swing, the knee folds as the leg swings through, arms swing against the legs with a soft elbow, shoulders twist against the hips, the body bobs
+    const w=o.w*live,ph=o.ph,s0=Math.sin(ph),s1=-s0,c0=Math.cos(ph),c1=-c0;
+    const L0=-.56*w*s0,L1=-.56*w*s1,K0=w*(.12+.95*Math.pow(Math.max(0,c0),1.3)),K1=w*(.12+.95*Math.pow(Math.max(0,c1),1.3));
+    const tw=.13*w*s0,bob=-.045*w*Math.abs(s0)+.012*w,lean=.08*w;
+    R.hips.position.set(c.hx,c.hy+bob,0);R.spine.rotation.set(c.sx+lean,c.sy+tw,c.sz);R.head.rotation.set(c.nx-lean*.6,c.ny-tw*.75,0);
+    const A=R.arms,Lg=R.legs;
+    A[0].b0.rotation.set(c.a0x-.48*w*s1,0,c.a0z);A[0].b1.rotation.x=c.a0e-w*(.18+.38*Math.max(0,s1));A[0].b2.rotation.x=c.a0w;
+    A[1].b0.rotation.set(c.a1x-.48*w*s0,0,c.a1z);A[1].b1.rotation.x=c.a1e-w*(.18+.38*Math.max(0,s0));A[1].b2.rotation.x=c.a1w;
+    const lx0=c.l0x+L0,lk0=c.l0k+K0,lx1=c.l1x+L1,lk1=c.l1k+K1;
+    Lg[0].b0.rotation.x=lx0;Lg[0].b1.rotation.x=lk0;Lg[0].b2.rotation.x=-(lx0+lk0)*.85-.2*w*Math.max(0,c0);   // the ankle keeps the sole level; toes lift as the foot swings through
+    Lg[1].b0.rotation.x=lx1;Lg[1].b1.rotation.x=lk1;Lg[1].b2.rotation.x=-(lx1+lk1)*.85-.2*w*Math.max(0,c1);
+  }
+  // how fast a figure is walking (0..1) and where its stride is, from how far it moved this frame; turning on the spot takes small steps
+  function stride(f,mv,dt,rot){const sp=Math.min(1,mv/Math.max(dt,1e-3)/SPEED);f.spd=(f.spd||0)+(sp-(f.spd||0))*Math.min(1,dt*9);
+    let dr=rot-(f.lr==null?rot:f.lr);dr=Math.atan2(Math.sin(dr),Math.cos(dr));f.lr=rot;const turn=Math.min(.45,Math.abs(dr)/Math.max(dt,1e-3)*.1);
+    f.trn=(f.trn||0)+(turn-(f.trn||0))*Math.min(1,dt*8);f.ph=(f.ph||0)+mv/.62*Math.PI+Math.abs(dr)*1.3;return Math.max(f.spd,f.trn)}
   let thR=null,thS=null,thC=null;
   api.palette=PAL;
+  let pvR=null,pvS=null,pvC=null,pvH=null,pvKey='',pvRaf=0,pvT0=0;
+  api.preview=(host,look)=>{try{
+    if(!pvR){pvR=new T.WebGLRenderer({antialias:true,alpha:true});pvR.setPixelRatio(Math.min(2,window.devicePixelRatio||1));pvS=new T.Scene();pvS.add(new T.HemisphereLight(0xffffff,0x55606a,1.05));
+      const d=new T.DirectionalLight(0xffffff,.55);d.position.set(2,4,5);pvS.add(d);pvC=new T.PerspectiveCamera(28,.75,.1,20);pvC.position.set(1.1,1.45,4.9);pvC.lookAt(0,1.0,0);pvR.domElement.className='pvcanvas'}
+    const cv2=pvR.domElement;if(cv2.parentNode!==host){host.innerHTML='';host.appendChild(cv2)}
+    const w=host.clientWidth||96,h=host.clientHeight||128;pvR.setSize(w,h,false);pvC.aspect=w/h;pvC.updateProjectionMatrix();
+    const key=JSON.stringify(look);if(key!==pvKey){pvKey=key;if(pvH){pvS.remove(pvH.g);freeTree(pvH.g)}pvH=human(look,null,null);pvH.g.rotation.y=.35;pvS.add(pvH.g);
+      pvH.g.traverse(o=>{if(o.isMesh)o.userData.free=Object.assign({g:1},o.userData.free||{})})}
+    if(!pvRaf){let last=0;const loop=t=>{if(!cv2.isConnected||!pvH){pvRaf=0;return}pvRaf=requestAnimationFrame(loop);const dt=Math.min(.1,(t-last)/1000||0);last=t;
+      rigPose(pvH,{w:0,ph:0,t:t/1000,gi:-1,mode:''},dt);pvH.g.rotation.y=.35+Math.sin(t/2600)*.25;pvR.render(pvS,pvC)};pvRaf=requestAnimationFrame(loop)}
+    return true}catch(e){return false}};
+  // tests and review: one figure in one pose, as an image (o = rigPose options, run for a second so the easing settles; side = view from the side)
+  api.poseShot=(look,o,w,h,side,role)=>{try{api.thumb(look,8,8);const H=human(look,null,role?{role}:null);for(let i=0;i<40;i++)rigPose(H,Object.assign({w:0,ph:0,t:i*.025,gi:-1,mode:''},o,{t:(o.t||0)+i*.025}),.025);
+    H.g.rotation.y=side?Math.PI/2.4:.3;thS.add(H.g);thR.setSize(w,h,false);thC.aspect=w/h;thC.updateProjectionMatrix();thC.position.set(1.3,1.45,5.2);thC.lookAt(0,.95,0);
+    thR.render(thS,thC);const url=thR.domElement.toDataURL('image/png');thS.remove(H.g);freeTree(H.g);return url}catch(e){return'ERR '+e.message}};
   api.thumb=(look,w,h,role)=>{try{                                   // a small portrait of a look, as an image
     if(!thR){thR=new T.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});thS=new T.Scene();thS.add(new T.HemisphereLight(0xffffff,0x55606a,1.05));
       const d=new T.DirectionalLight(0xffffff,.55);d.position.set(2,4,5);thS.add(d);thC=new T.PerspectiveCamera(28,1,.1,20)}
     thR.setPixelRatio(1);thR.setSize(w,h,false);thC.aspect=w/h;thC.updateProjectionMatrix();thC.position.set(1.3,1.5,4.6);thC.lookAt(0,1.02,0);
-    const f=human(look,null,role?{role}:null).g;f.rotation.y=.3;thS.add(f);thR.render(thS,thC);const url=thR.domElement.toDataURL('image/png');thS.remove(f);f.traverse(o=>{if(o.isMesh&&o.geometry!==FACE)o.geometry.dispose()});return url}catch(e){return''}};
+    const H=human(look,null,role?{role}:null),f=H.g;rigPose(H,{w:0,ph:0,t:0,gi:-1,mode:''},10);f.rotation.y=.3;thS.add(f);thR.render(thS,thC);const url=thR.domElement.toDataURL('image/png');thS.remove(f);f.traverse(o=>{if(o.isMesh&&o.geometry!==FACE)o.geometry.dispose()});return url}catch(e){return''}};
 
   /* ---------- 感染戰: a building to walk around (2 halls + 6 rooms) ---------- */
   const M=A.MAP,spawnOf=A.spawnOf;
@@ -368,10 +453,10 @@ window.Stage3D=(()=>{
     for(const key in Bk){const k=key.split('|')[0];root.add(own(Bk[key].mesh(MATS[k]),1,1))}
     // people
     S.players.forEach((p,i)=>{
-      const gg=new T.Group(),H=human(p.look||A.LOOKS[i%A.LOOKS.length][1],p.id),pivot=H.g,arm=H.arms[0],arm2=H.arms[1];
+      const gg=new T.Group(),H=human(p.look||A.LOOKS[i%A.LOOKS.length][1],p.id),pivot=H.g,arm=H.arms[0].b2;
       pivot.traverse(o=>{if(o.isMesh)picks.push(o)});
       const props={gun:new T.Mesh(G.gun,mat(0x111418)),cup:new T.Mesh(G.cup,mat(0x7fd4e8)),box:new T.Mesh(G.box,mat(0xf1cf63))};
-      for(const k in props){props[k].position.y=-.53;props[k].visible=false;arm.add(props[k])}props.gun.rotation.x=Math.PI/2;
+      for(const k in props){props[k].position.set(0,-.08,.02);props[k].visible=false;arm.add(props[k])}props.gun.rotation.x=Math.PI/2;props.cup.position.set(0,-.1,.04);props.box.position.set(0,-.1,.06);
       gg.add(pivot);
       const ring=own(new T.Mesh(G.ring,new T.MeshBasicMaterial({color:0xe8a33d})),0,1);ring.rotation.x=Math.PI/2;ring.position.y=.04;ring.visible=false;gg.add(ring);
       const seatN=g.seat&&g.seat[p.id]?g.seat[p.id]:0,sc=seatN?A.seatMark(seatN).c:'#e8a33d';
@@ -382,7 +467,7 @@ window.Stage3D=(()=>{
       const gl=own(new T.Sprite(new T.SpriteMaterial({transparent:true,depthTest:true,sizeAttenuation:true})),0,1);gl.scale.set(2.2,.55,1);gl.position.set(0,2.95,0);gl.visible=false;gl.renderOrder=4;gg.add(gl);
       const sp=spawnOf(i,n);gg.position.set(sp.x,0,sp.z);gg.rotation.y=sp.r;root.add(gg);
       const bub=own(new T.Sprite(new T.SpriteMaterial({map:texOf('說話中','#8fe3ff'),transparent:true,depthTest:true,sizeAttenuation:true})),0,1);bub.scale.set(1.5,.375,1);bub.position.set(0,2.5,0);bub.visible=false;gg.add(bub);
-      figs[p.id]={g:gg,pivot,arm,arm2,legs:H.legs,inks:H.inks,inkNear:true,props,ring,gl,bub,name,dmk,cmk,sr,dead:false,role:null,gi:-1,sp,art:null,artKey:'',shown:true,walk:0,lx:sp.x,lz:sp.z};
+      figs[p.id]={g:gg,pivot,rig:H,inks:H.inks,inkNear:true,props,ring,gl,bub,name,dmk,cmk,sr,dead:false,role:null,gi:-1,sp,art:null,artKey:'',shown:true,walk:0,lx:sp.x,lz:sp.z};
       peers[p.id]={x:sp.x,z:sp.z,r:sp.r,gi:-1,gt:''};
     });
     const Z=M.size+.6;mini.innerHTML=`<svg viewBox="${-Z} ${-Z} ${Z*2} ${Z*2}">${M.rooms.map(r=>`<rect data-r="${r.id}" class="${r.corr?'co':''}" x="${r.x0}" y="${r.z0}" width="${r.x1-r.x0}" height="${r.z1-r.z0}"/>${r.corr?'':`<text x="${(r.x0+r.x1)/2}" y="${(r.z0+r.z1)/2+1}">${r.n.slice(0,2)}</text>`}`).join('')}<circle r="1.2" cx="0" cy="0"/></svg>`;
@@ -461,6 +546,7 @@ window.Stage3D=(()=>{
         const room=A.roomOf(me3.x,me3.z),rn=(M.rooms.find(r=>r.id===room)||{}).n||'';if(!gest&&!prog)tip.textContent=rn?'你在'+rn:'';
         const c=mini.querySelector('circle');if(c){c.setAttribute('cx',me3.x.toFixed(1));c.setAttribute('cy',me3.z.toFixed(1));mini.querySelectorAll('rect').forEach(e=>e.classList.toggle('on',e.dataset.r===room))}}
     }
+    const talkers=Object.keys(speak).filter(k=>speak[k]&&figs[k]);
     const over=S.phase==='over'&&!api.roam,ids=Object.keys(figs),kp=1-Math.exp(-dt*14),kr=1-Math.exp(-dt*15),ka=1-Math.exp(-dt*18);shadows.begin();if(over!==wasOver){wasOver=over;camYaw=over?Math.PI:me3.r}      // over = the line-up; walking around after the game is not
     for(const id in figs){const f=figs[id],p=peers[id];if(!p)continue;const self=id===me&&mine,vis=over||!p.hidden||id===me;
       if(f.shown!==vis){f.shown=vis;f.g.visible=vis}if(!vis)continue;
@@ -474,22 +560,19 @@ window.Stage3D=(()=>{
         let dr=p.r-f.g.rotation.y;dr=Math.atan2(Math.sin(dr),Math.cos(dr));f.g.rotation.y+=dr*kr}
       shadows.put(f.g.position.x,f.g.position.y,f.g.position.z,1);
       const nearC=over||f.g.position.distanceToSquared(cam.position)<inkD2;if(nearC!==f.inkNear){f.inkNear=nearC;for(const o of f.inks)o.visible=nearC;if(f.artH)for(const o of f.artH.inks)o.visible=nearC}
-      if(f.art){f.pop=Math.min(1,(f.pop||0)+dt*3);const e=1-Math.pow(1-f.pop,3);f.art.scale.setScalar(.55+.45*e);f.art.position.y=!still&&over?Math.abs(Math.sin(t/500+f.sp.r*2))*.05:0;
-        const mv=Math.hypot(f.g.position.x-f.lx,f.g.position.z-f.lz);f.lx=f.g.position.x;f.lz=f.g.position.z;f.walk+=mv*4.2;const sw=!over&&mv>.002&&!still?Math.sin(f.walk)*.55:0,lg=f.artH&&f.artH.legs;   // identity figures walk too
-        if(lg){lg[0].rotation.x+=(sw-lg[0].rotation.x)*ka;lg[1].rotation.x+=(-sw-lg[1].rotation.x)*ka}continue}
+      const mv=Math.hypot(f.g.position.x-f.lx,f.g.position.z-f.lz);f.lx=f.g.position.x;f.lz=f.g.position.z;const wk=over?0:stride(f,mv,dt,f.g.rotation.y);
+      const d2=f.g.position.distanceToSquared(cam.position);f.aT=(f.aT||0)+dt;const busy=d2<400||over||f.aT>.1;      // past 20 m a figure is posed ten times a second, not every frame
+      // the head turns towards whoever is talking nearby
+      let look=null;if(!over&&talkers.length){let best=36;for(const s2 of talkers){if(s2===id)continue;const q=figs[s2];if(!q||!q.shown)continue;const dx=q.g.position.x-f.g.position.x,dz=q.g.position.z-f.g.position.z,dd=dx*dx+dz*dz;
+        if(dd<best){best=dd;let a=Math.atan2(dx,dz)-f.g.rotation.y;a=Math.atan2(Math.sin(a),Math.cos(a));look=Math.max(-1.05,Math.min(1.05,a))}}}
+      if(f.art){f.pop=Math.min(1,(f.pop||0)+dt*3);const e=1-Math.pow(1-f.pop,3);f.art.scale.setScalar(.55+.45*e);f.art.position.y=0;
+        const res=cur.S.result,mode=over?(res&&res.rw&&res.rw[id]>0?'cheer':'slump'):cur.S.phase==='play'?'ghost':'';
+        if(busy&&f.artH){rigPose(f.artH,{w:mode==='ghost'?0:wk,ph:f.ph||0,t:t/1000,gi:-1,mode,look:mode?null:look,talk:!!speak[id]},f.aT);f.aT=0}continue}
       const gi=p.gi,dk=env.dark.length&&env.dark.includes(A.roomOf(f.g.position.x,f.g.position.z));
       if(gi!==f.gi){f.gi=gi;for(const k in f.props)f.props[k].visible=gi>=0&&GL[gi][2]===k;if(gi>=0){f.gl.material.map=texOf(GN[gi],'#ffe9a8');f.gl.material.needsUpdate=true}}
-      const far=id!==me&&f.g.position.distanceToSquared(cam.position)>64;                 // past 8 m only the seat mark shows, so 16 name tags do not pile up
+      const far=id!==me&&d2>64;                 // past 8 m only the seat mark shows, so 16 name tags do not pile up
       f.gl.visible=gi>=0&&!dk;f.name.visible=!dk&&!far;f.cmk.visible=!dk&&far;f.dmk.visible=!!dk;f.sr.visible=!dk;     // in a dark room nobody can read what you are doing: only the outline of the seat mark shows
-      let ax=0,az=0,bow=0,sit=0;
-      if(gi>=0){const L=GL[gi],w=still?0:t/1000;ax=-L[0];
-        if(L[1]==='thrust')ax+=Math.sin(w*6)*.3;else if(L[1]==='clink')az=Math.sin(w*4)*.25;else if(L[1]==='rps')ax+=Math.sin(w*8)*.55;else if(L[1]==='pat')ax+=Math.sin(w*14)*.14;
-        else if(L[1]==='side')az=-.9;else if(L[1]==='bow')bow=.55+Math.sin(w*3)*.1;else if(L[1]==='sit'){sit=-.16;ax=-.5}}
-      f.arm.rotation.x+=(ax-f.arm.rotation.x)*ka;f.arm.rotation.z+=(az-f.arm.rotation.z)*ka;f.arm2.rotation.x=f.arm.rotation.x;f.arm2.rotation.z=-f.arm.rotation.z;f.pivot.rotation.x+=(bow-f.pivot.rotation.x)*ka*.7;
-      f.pivot.position.y+=(sit-f.pivot.position.y)*ka*.8;
-      const mv=Math.hypot(f.g.position.x-f.lx,f.g.position.z-f.lz);f.lx=f.g.position.x;f.lz=f.g.position.z;f.walk+=mv*4.2;const sw=mv>.002&&!still?Math.sin(f.walk)*.55:0;
-      const lt=sit?-1.45:sw;f.legs[0].rotation.x+=(lt-f.legs[0].rotation.x)*ka;f.legs[1].rotation.x+=((sit?-1.45:-sw)-f.legs[1].rotation.x)*ka;
-      if(gi<0){f.arm.rotation.x+=(-sw*.7-f.arm.rotation.x)*ka;f.arm2.rotation.x+=(sw*.7-f.arm2.rotation.x)*ka}
+      if(busy){rigPose(f.rig,{w:gi>=0?0:wk,ph:f.ph||0,t:t/1000,gi,mode:'',look:gi>=0?null:look,talk:!!speak[id]},f.aT);f.aT=0}
     }
     shadows.end();
     const cx=me3.ok?me3.x:M.table.x,cz=me3.ok?me3.z:M.table.z,sx=Math.sin(camYaw),sz=Math.cos(camYaw);
@@ -625,7 +708,7 @@ window.Stage3D=(()=>{
   api.stop=()=>stopGesture(true);
   api.busy=()=>!!gest;
   api.setYaw=y=>{camYaw=y};
-  api.debugTris=()=>{const tri=g=>{let n=0,ink=0;g.traverse(o=>{if(o.isMesh&&o.geometry){const ix=o.geometry.index,t=(ix?ix.count:o.geometry.attributes.position.count)/3;if(o.material===inkM)ink+=t;else n+=t}});return[Math.round(n),Math.round(ink)]};const f=Object.values(figs)[0];let sc=0;root.traverse(o=>{if(o.isMesh&&o.geometry&&!o.userData.id&&o.parent===root){const ix=o.geometry.index;sc+=(ix?ix.count:o.geometry.attributes.position.count)/3}});return{figure:f?tri(f.pivot):null,scenery:Math.round(sc)}};   // (tests: how heavy things are)
+  api.debugTris=()=>{const tri=g=>{let n=0,ink=0;g.traverse(o=>{if(o.isMesh&&o.geometry){const ix=o.geometry.index,t=(ix?ix.count:o.geometry.attributes.position.count)/3;if(o.material===inkM||o.material===inkSk)ink+=t;else n+=t}});return[Math.round(n),Math.round(ink)]};const f=Object.values(figs)[0];let sc=0;root.traverse(o=>{if(o.isMesh&&o.geometry&&!o.userData.id&&o.parent===root){const ix=o.geometry.index;sc+=(ix?ix.count:o.geometry.attributes.position.count)/3}});return{figure:f?tri(f.pivot):null,scenery:Math.round(sc)}};   // (tests: how heavy things are)
   api.perf=()=>{const i=renderer.info;let lights=0;scene.traverse(o=>{if(o.isLight&&o.visible)lights++});return{calls:i.render.calls,tris:i.render.triangles,programs:i.programs.length,geos:i.memory.geometries,tex:i.memory.textures,lights,px:renderer.getPixelRatio(),size:[cv.width,cv.height]}};
   api.debug=()=>({quality:qLv,art:Object.fromEntries(Object.entries(figs).map(([k,f])=>[k,f.artKey])),me:Object.assign({},me3),peers:JSON.parse(JSON.stringify(peers)),gest,camYaw,seated,prog,env,room:A.roomOf(me3.x,me3.z),near:nearObjs()});
   api.teleport=(x,z)=>{if(!A.walkable(x,z)||A.blocked(x,z))return false;if(seated){seated=false;if(api.onEnv)api.onEnv({a:'stand'})}me3.x=x;me3.z=z;return true};
